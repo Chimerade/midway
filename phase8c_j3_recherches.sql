@@ -22,9 +22,19 @@ INSERT INTO missions VALUES
  ('MS-0603-PBY-SEARCH','USN','SH-MIDWAY','search','Recherche quotidienne OSO (ligne de Reid, VP-44, relèvement ~253°)',
   '1942-06-03T04:15:00-12:00','1942-06-03T04:30:00-12:00',NULL,'1942-06-03T18:15:00-12:00',
   '09:00: contact "Main Body" (en réalité les transports); Reid maintient le contact ~2h',
-  'Une ligne représentative; l''éventail complet du 3 juin (~22 PBY) sera tracé avec le schéma CINCPAC');
+  'Éventail de ~22 PBY (Sand + Eastern Island), décollage 04:15, secteurs ~700 nm; seule la ligne de Reid (253°) fait un contact — par hasard. Sources: CINCPAC 01849, VP-44.');
 INSERT INTO mission_squadrons VALUES
- ('MS-0603-PBY-SEARCH','SQ-PBY-MIDWAY',1,0,NULL,'PBY 44-P-4 (Reid)');
+ ('MS-0603-PBY-SEARCH','SQ-PBY-MIDWAY',22,0,NULL,'~22 PBY en éventail (6 lignes représentatives); PBY 44-P-4 (Reid) fait le contact sur la ligne 253°');
 INSERT INTO mission_legs (mission_id,seq,start_ts,end_ts,start_lat,start_lon,end_lat,end_lon,course_deg,speed_kn,altitude_m,method,notes) VALUES
  ('MS-0603-PBY-SEARCH',1,'1942-06-03T04:15:00-12:00','1942-06-03T11:15:00-12:00',28.21,-177.37,24.80,-189.83,253,100,300,'estimated','aller 700 nm — contact à ~450 nm vers 09:00'),
- ('MS-0603-PBY-SEARCH',2,'1942-06-03T11:15:00-12:00','1942-06-03T18:15:00-12:00',24.80,-189.83,28.21,-177.37,73,100,300,'estimated','retour (avec ~2h de pistage du convoi: simplifié)');
+ ('MS-0603-PBY-SEARCH',2,'1942-06-03T11:15:00-12:00','1942-06-03T18:15:00-12:00',24.80,-189.83,28.21,-177.37,73,100,300,'estimated','retour (avec ~2h de pistage du convoi: simplifié)'),
+ ('MS-0603-PBY-SEARCH',3,'1942-06-03T04:15:00-12:00','1942-06-03T11:15:00-12:00',28.21,-177.37,18.11,-183.99,210,100,300,'estimated','ligne 210° — aller 700 nm (RAS)'),
+ ('MS-0603-PBY-SEARCH',4,'1942-06-03T04:15:00-12:00','1942-06-03T11:15:00-12:00',28.21,-177.37,21.03,-187.80,232,100,300,'estimated','ligne 232° — aller 700 nm (RAS)'),
+ ('MS-0603-PBY-SEARCH',5,'1942-06-03T04:15:00-12:00','1942-06-03T11:15:00-12:00',28.21,-177.37,29.23,-190.56,275,100,300,'estimated','ligne 275° — aller 700 nm (RAS)'),
+ ('MS-0603-PBY-SEARCH',6,'1942-06-03T04:15:00-12:00','1942-06-03T11:15:00-12:00',28.21,-177.37,33.51,-189.17,297,100,300,'estimated','ligne 297° — aller 700 nm (RAS)'),
+ ('MS-0603-PBY-SEARCH',7,'1942-06-03T04:15:00-12:00','1942-06-03T11:15:00-12:00',28.21,-177.37,37.15,-185.88,320,100,300,'estimated','ligne 320° — aller 700 nm (RAS)'),
+ ('MS-0603-PBY-SEARCH',8,'1942-06-03T11:15:00-12:00','1942-06-03T18:15:00-12:00',18.11,-183.99,28.21,-177.37,30,100,300,'estimated','ligne 210° — retour'),
+ ('MS-0603-PBY-SEARCH',9,'1942-06-03T11:15:00-12:00','1942-06-03T18:15:00-12:00',21.03,-187.80,28.21,-177.37,52,100,300,'estimated','ligne 232° — retour'),
+ ('MS-0603-PBY-SEARCH',10,'1942-06-03T11:15:00-12:00','1942-06-03T18:15:00-12:00',29.23,-190.56,28.21,-177.37,95,100,300,'estimated','ligne 275° — retour'),
+ ('MS-0603-PBY-SEARCH',11,'1942-06-03T11:15:00-12:00','1942-06-03T18:15:00-12:00',33.51,-189.17,28.21,-177.37,117,100,300,'estimated','ligne 297° — retour'),
+ ('MS-0603-PBY-SEARCH',12,'1942-06-03T11:15:00-12:00','1942-06-03T18:15:00-12:00',37.15,-185.88,28.21,-177.37,140,100,300,'estimated','ligne 320° — retour');

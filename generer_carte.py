@@ -169,7 +169,9 @@ build = {
 }
 data = {'entities': entities, 'wrecks': wrecks, 'fires': fires, 'combats': combats,
         'spots': spots, 'raids': raids, 'events': events, 'contacts': contacts,
-        'tmax': max(e['t'] for e in events) + 120, 'build': build}
+        'tmax': max(e['t'] for e in events) + 120,
+        'tmin': min([e['t'] for e in events] + [p['t'] for en in entities for p in en['track']]) - 30,
+        'build': build}
 con.close()
 
 HTML = r'''<!DOCTYPE html>
@@ -246,8 +248,8 @@ HTML = r'''<!DOCTYPE html>
 const D = __DATA__;
 const LAT0=28.21, LON0=-177.37, RAD=Math.PI/180;
 const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
-let T=270, playing=false, scale=1.0, panX=0, panY=-120;
-const slider=document.getElementById('slider'); slider.max=D.tmax;
+let T=D.tmin, playing=false, scale=1.0, panX=0, panY=-120;
+const slider=document.getElementById('slider'); slider.min=D.tmin; slider.max=D.tmax;
 const zoomCtl=document.getElementById('zoom');
 const colors={USN:'#1f6fce',IJN:'#d23b3b'};
 const THEMES={
@@ -265,7 +267,7 @@ function proj(lat,lon){
 }
 function fmt(t){
   t=Math.floor(t);
-  const d=3+Math.floor(t/1440), h=Math.floor((t%1440)/60), m=t%60;
+  const d=3+Math.floor(t/1440), mins=((t%1440)+1440)%1440, h=Math.floor(mins/60), m=mins%60;
   return `${d} juin 1942 — ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')} (GMT−12)`;
 }
 function cardinal(b){return ['N','NE','E','SE','S','SO','O','NO'][Math.round(((b%360)+360)%360/45)%8];}
@@ -312,15 +314,20 @@ function draw(){
   cv.width=cv.parentElement.clientWidth; cv.height=cv.parentElement.clientHeight;
   ctx.fillStyle=P.bg; ctx.fillRect(0,0,cv.width,cv.height);
   // grille
-  ctx.strokeStyle=P.grid; ctx.lineWidth=1; ctx.fillStyle=P.gridLbl; ctx.font='9px Verdana';
-  for(let la=26;la<=34;la++){ const [x1,y1]=proj(la,-188), [x2,y2]=proj(la,-170);
+  // grille dynamique — couvre le viewport (parallèles 1°, méridiens 2°, antiméridien en pointillé)
+  ctx.lineWidth=1; ctx.font='9px Verdana';
+  const _il=sy=>LAT0+((cv.height/2-sy)/(scale*pxnm())-panY)/60;
+  const _io=sx=>LON0+((sx-cv.width/2)/(scale*pxnm())-panX)/(60*Math.cos(LAT0*RAD));
+  const la0=Math.max(-10,Math.floor(_il(cv.height))-1), la1=Math.min(80,Math.ceil(_il(0))+1);
+  const lo0=Math.floor(_io(0))-1, lo1=Math.ceil(_io(cv.width))+1;
+  ctx.strokeStyle=P.grid; ctx.fillStyle=P.gridLbl;
+  for(let la=la0; la<=la1; la++){ const [x1,y1]=proj(la,lo0), [x2,y2]=proj(la,lo1);
     ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke(); ctx.fillText(la+'°N',8,y1-3);}
-  for(let lo=-188;lo<=-170;lo+=2){ const [x1,y1]=proj(26,lo), [x2,y2]=proj(34,lo);
+  for(let lo=lo0; lo<=lo1; lo++){ if(lo%2!==0) continue;
+    const [x1,y1]=proj(la0,lo), [x2,y2]=proj(la1,lo);
     ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
-    const lbl=lo<-180?(360+lo)+'°E':(-lo)+'°W'; ctx.fillText(lbl,x1+3,cv.height-8);}
-  ctx.setLineDash([4,4]); ctx.strokeStyle=P.idl;
-  const [ax1,ay1]=proj(25.5,-180), [ax2,ay2]=proj(34.5,-180);
-  ctx.beginPath();ctx.moveTo(ax1,ay1);ctx.lineTo(ax2,ay2);ctx.stroke(); ctx.setLineDash([]);
+    const lbl=lo<-180?(360+lo)+'°E':(lo===-180?'180° (date)':(-lo)+'°W'); ctx.fillStyle=P.gridLbl; ctx.fillText(lbl,x1+3,cv.height-8);}
+  ctx.strokeStyle=P.grid;
   // Midway + anneaux
   const [mx,my]=proj(LAT0,LON0);
   ctx.strokeStyle=P.ring;
@@ -597,7 +604,7 @@ window.addEventListener('mouseup',e=>{
     } else box.style.display='none';
   }
   drag=null;});
-T=270; buildFeed(); updateFeed(true); tick();
+T=D.tmin; buildFeed(); updateFeed(true); tick();
 </script></body></html>'''
 
 html = HTML.replace('__DATA__', json.dumps(data, ensure_ascii=False))

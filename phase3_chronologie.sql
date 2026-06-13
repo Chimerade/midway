@@ -21,6 +21,7 @@ INSERT INTO events (event_id,ts,time_uncertainty_min,event_type,side,summary,pha
 INSERT INTO events (event_id,ts,time_uncertainty_min,event_type,side,summary,phase) VALUES
  ('EV-0602-1530-POINTLUCK','1942-06-02T15:30:00-12:00',30,'other','USN','Jonction TF-16/TF-17 à Point Luck (~32°N 173°W, 045°/325 nm de Midway); Fletcher (Yorktown) prend le commandement tactique; TF-16 prend station à 10 nm au sud','J3-approche'),
  ('EV-0603-1950-TURNSOUTH','1942-06-03T19:50:00-12:00',20,'course_change','USN','Fletcher vire au 210° à 13,5 nœuds pour positionner les TF face aux vents du sud, en vue du lancement de l''aube du 4','J3-approche'),
+ ('EV-0604-0415-PBYSEARCH','1942-06-04T04:15:00-12:00',15,'launch_start','USN','Recherche du matin: ~22 PBY décollent de Midway (Sand + Eastern Island) en éventail jusqu''à ~700 nm — c''est elle qui donnera les contacts d''Ady (CV, 05:34) et de Chase (raid entrant, 05:45)','J4-matin'),
  ('EV-0604-0445-LAUNCHEND','1942-06-04T04:45:00-12:00',5,'launch_end','IJN','Fin du lancement de la frappe Tomonaga (108 appareils des 4 CV)','J4-matin'),
  ('EV-0604-0430-SEARCH','1942-06-04T04:30:00-12:00',10,'launch_start','IJN','Lancement du plan de recherche (7 appareils, une seule phase); catapulte du Tone en panne','J4-matin'),
  ('EV-0604-0500-TONE4UP','1942-06-04T05:00:00-12:00',10,'launch_end','IJN','Hydravion n°4 du Tone (Amari) lancé avec ~30 min de retard — il couvrira la ligne où se trouvent les TF US','J4-matin'),

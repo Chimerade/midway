@@ -1,5 +1,5 @@
 # Rapport F1 — replay du 4 juin à travers le modèle de contraintes
-Run 2026-06-13T09:22:43+00:00 — 13 vérifications : 0 incohérences, 2 tensions, 7 cohérentes, 4 bornes contre-factuelles
+Run 2026-06-13T14:29:20+00:00 — 13 vérifications : 0 incohérences, 2 tensions, 7 cohérentes, 4 bornes contre-factuelles
 
 ## [~] AKAGI — Retour bombe->torpille (D2) — fin théorique sans interruption
 - Historique : P&T: encore incomplet à 10:20; bombes non rangées
