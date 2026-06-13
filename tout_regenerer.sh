@@ -27,5 +27,6 @@ python3 audit_coherence.py "$TMP"                 && echo "[4/6] audit OK"
 python3 verif_textes.py "$TMP" | head -3          && echo "[5/6] vérif textes vs réalité OK"
 cp "$TMP" midway.sqlite
 cp "$(dirname "$TMP")/rapport_f1.md" . 2>/dev/null || true
-python3 generer_carte.py midway.sqlite carte_midway.html && echo "[5/5] carte régénérée"
+python3 generer_carte.py midway.sqlite carte_midway.html && echo "[5/6] carte régénérée"
+python3 data/export_data.py midway.sqlite web/public/data && echo "[6/6] JSON exportés vers web/"
 echo "Terminé. Tampon de la carte = empreinte de la base finale."

@@ -1,0 +1,289 @@
+<header>
+  <h1>Bataille de Midway (3–7 juin 1942)</h1>
+  <p>Méthodologie de constitution des données et ossature du futur programme de simulation</p>
+</header>
+
+<main>
+
+<div class="note"><b>État d'avancement (v2, 12 juin 2026).</b> Les phases 0 à 7 sont <b>ossaturées et outillées</b> :
+base SQLite opérationnelle (79 événements, 59 trajets aériens, 15 décisions instrumentées, 61 claims),
+carte de replay interactive (<code>carte_midway.html</code>), audit de cohérence automatisé, moteur d'inférence
+des positions par contraintes, et moteur F1 (replay du 4 juin à travers le modèle de contraintes —
+13 vérifications, 0 incohérence, cf. <code>rapport_f1.md</code>). Restent ouverts : le dépouillement
+systématique des sources (17/61 claims vérifiées 2 sources), le géoréférencement des cartes de référence,
+la CAP et les sous-marins, et les moteurs F2/F3. Le pipeline <code>tout_regenerer.sh</code> reconstruit
+l'ensemble ; le tampon <code>#hash</code> de la carte garantit sa synchronisation avec la base.</div>
+
+<h2 id="s1">1. Principes directeurs</h2>
+<p>Le programme visé a trois fonctions, qui imposent chacune une exigence distincte sur les données&nbsp;:</p>
+<table>
+  <tr><th>Fonction</th><th>Exigence sur les données</th><th>Conséquence méthodologique</th></tr>
+  <tr><td><b>F1 — Replay historique</b> sur carte 2D à l'échelle</td><td>Chronologie et positions continues, datées, sourcées</td><td>Toute position/heure doit porter un indice de confiance et une méthode (observée vs reconstruite)</td></tr>
+  <tr><td><b>F2 — Simulation des décisions optimales</b></td><td>Modèle de contraintes physiques complet (ponts, réarmement, carburant, délais)</td><td>Les contraintes doivent être paramétrées (durées, capacités), pas seulement décrites</td></tr>
+  <tr><td><b>F3 — Contre-factuel ciblé</b> (modifier une décision, observer les conséquences)</td><td>Décisions isolées comme entités, avec l'information dont disposait le décideur</td><td>Séparer strictement <i>état réel du monde</i> et <i>état connu de chaque camp</i> (fog of war)</td></tr>
+</table>
+<p>Trois principes en découlent&nbsp;:</p>
+<p><b>P1 — Séparer faits, reconstructions et paramètres de modèle.</b> La BDD distingue ce qui est attesté par une source primaire, ce qui est interpolé, et ce qui est un paramètre de simulation (ex.&nbsp;: durée de réarmement d'une escadrille). On ne mélange jamais les trois.</p>
+<p><b>P2 — Toute donnée est une <i>affirmation sourcée</i>, pas une vérité.</b> Les sources se contredisent (heures, positions, effectifs). Le schéma stocke les affirmations concurrentes (<code>claims</code>) et une valeur retenue avec justification — ce qui permet de réviser sans perdre l'historique.</p>
+<p><b>P3 — Midway est un problème d'ordonnancement sous information incomplète.</b> Le cœur du modèle n'est pas le combat mais le cycle des ponts d'envol&nbsp;: lancer / récupérer / déplacer / réarmer / ravitailler, avec le pont comme ressource critique unique par porte-avions. La granularité retenue est l'<b>escadrille</b> (squadron / chūtai), le cycle de pont étant modélisé par porte-avions.</p>
+
+<h2 id="s2">2. Conventions fondamentales (à figer avant toute saisie)</h2>
+
+<h3>2.1 Le temps — premier piège de Midway</h3>
+<div class="alerte"><b>Les sources utilisent trois référentiels horaires différents.</b> Les documents japonais (rapport Nagumo, journaux de bord) sont en heure de Tokyo (GMT+9). Les documents américains de synthèse utilisent l'heure locale de Midway (zone GMT−12). L'écart est de 21&nbsp;heures, avec changement de date&nbsp;: «&nbsp;01h30 le 5 juin&nbsp;» côté japonais = «&nbsp;04h30 le 4 juin&nbsp;» côté Midway. De nombreuses erreurs dans la littérature viennent de là.
+<br><b>Confirmé au dépouillement (Phase 8)&nbsp;:</b> les journaux de bord des porte-avions US sont dans un <b>quatrième</b> référentiel, la zone GMT−10 (heure du bord = Midway +2h)&nbsp;: l'attaque du Hiryū y est consignée «&nbsp;1905&nbsp;» pour 17h05 réelles. Le champ <code>time_reference</code> de chaque source est donc obligatoire, et toute heure est saisie avec sa valeur d'origine dans <code>claims.original_value</code>.</div>
+<p><b>Convention retenue&nbsp;:</b> toutes les heures stockées en base sont en <b>heure locale Midway (GMT−12)</b>, au format ISO&nbsp;8601 (<code>1942-06-04T10:22:00-12:00</code>), avec un champ <code>time_uncertainty_min</code>. L'heure d'origine de la source et son référentiel sont conservés dans la table <code>claims</code>. C'est la convention de Parshall &amp; Tully (<i>Shattered Sword</i>), référence moderne.</p>
+
+<h3>2.2 L'espace</h3>
+<table>
+  <tr><th>Élément</th><th>Convention</th></tr>
+  <tr><td>Stockage</td><td>Latitude/longitude WGS84 en degrés décimaux (les sources donnent du degrés-minutes&nbsp;: conversion à la saisie, valeur d'origine conservée)</td></tr>
+  <tr><td>Affichage carte</td><td>Projection azimutale équidistante centrée sur Midway (28°12′N, 177°21′W) — distances et relèvements exacts depuis le centre, déformation négligeable sur ~700&nbsp;nm</td></tr>
+  <tr><td>Distances</td><td>Milles nautiques (nm)&nbsp;; vitesses en nœuds&nbsp;; caps en degrés vrais</td></tr>
+  <tr><td>Précision</td><td>Chaque position porte <code>position_error_nm</code> estimé. Les positions de 1942 reposent sur l'estime&nbsp;: erreurs de 20–60&nbsp;nm courantes (ex.&nbsp;: le rapport du PBY de 05h34 plaçait la Kidō Butai ~40&nbsp;nm trop près de Midway, ce qui a contribué au vol pour rien du groupe aérien du Hornet)</td></tr>
+</table>
+
+<h3>2.3 Identifiants</h3>
+<p>Identifiants stables, lisibles, préfixés par type&nbsp;: <code>SH-AKAGI</code>, <code>SH-CV6</code> (Enterprise), <code>SQ-VT8</code>, <code>SQ-AKAGI-KANKO</code> (escadrille de B5N de l'Akagi), <code>AC-B5N2</code>, <code>EV-0604-1022-A</code> (événement), <code>PR-NAGUMO</code>. La base aérienne de Midway est traitée comme un «&nbsp;porte-avions insubmersible&nbsp;»&nbsp;: <code>SH-MIDWAY</code>, avec ses propres contraintes de piste.</p>
+
+<h2 id="s3">3. Phasage méthodologique</h2>
+
+<div class="phase"><h3>Phase 0 — Cadrage <span class="meta">(fait — décisions ci-dessus)</span></h3>
+<p>Périmètre&nbsp;: bataille entière du 3 au 7 juin 1942 (approche, frappes du 3 juin, journée décisive du 4, poursuite Mogami/Mikuma, perte du Yorktown). Granularité aérienne&nbsp;: escadrille. Stockage&nbsp;: SQLite. Conventions temps/espace figées (§2). Critère de sortie&nbsp;: ce document validé.</p></div>
+
+<div class="phase"><h3>Phase 1 — Corpus de sources et protocole de vérification</h3>
+<p>Constituer la bibliothèque (§4), attribuer les grades de fiabilité, définir la règle d'arbitrage des contradictions. <b>Critère de sortie&nbsp;:</b> table <code>sources</code> remplie, ≥&nbsp;2 sources indépendantes identifiées pour chaque famille de données (OOB, chronologie, positions, caractéristiques techniques).</p></div>
+
+<div class="phase"><h3>Phase 2 — Référentiel statique (ce qui ne bouge pas pendant la bataille)</h3>
+<p>Ordres de bataille complets des deux camps, caractéristiques des navires, contraintes physiques des porte-avions et de Midway, fiches des types d'avions, effectifs des escadrilles au matin du 4 juin, chaîne de commandement. <b>Critère de sortie&nbsp;:</b> tables <code>ships</code>, <code>carrier_constraints</code>, <code>aircraft_types</code>, <code>squadrons</code>, <code>persons</code> complètes, chaque valeur critique vérifiée par 2 sources.</p></div>
+
+<div class="phase"><h3>Phase 3 — Chronologie événementielle</h3>
+<p>Saisie de tous les événements datés&nbsp;: détections, messages, ordres, lancements, récupérations, attaques, impacts, avaries, sabordages. Chaque événement = heure (convertie GMT−12) + incertitude + acteurs + sources. Commencer par les ~60 ancres majeures (§7), puis densifier. <b>Critère de sortie&nbsp;:</b> chronologie continue sans trou &gt;&nbsp;30&nbsp;min pour les unités majeures sur la journée du 4 juin&nbsp;; trous restants explicitement listés.</p></div>
+
+<div class="phase"><h3>Phase 4 — Trajectoires et positions</h3>
+<p>Saisie des positions attestées (rapports de contact, journaux de bord, points de lancement/récupération), puis reconstruction des trajectoires par interpolation contrainte (vitesse max, caps ordonnés connus). Trajets des raids aériens reconstruits par cap/vitesse/heures de départ-arrivée. <b>Critère de sortie&nbsp;:</b> piste continue (1 point/10&nbsp;min en mode interpolé) pour chaque formation navale et chaque raid, rejouable sur la carte.</p></div>
+
+<div class="phase"><h3>Phase 5 — Paramétrage des processus (le cœur de F2)</h3>
+<p>Quantifier les opérations&nbsp;: durées de spot/lancement/récupération par pont, cycles d'ascenseurs, durées de réarmement par configuration (torpille↔bombe), ravitaillement, rotation de la CAP, délais de transmission et de décision. Sources&nbsp;: rapports d'action, Shattered Sword (annexes sur les opérations de pont japonaises), doctrine. <b>Critère de sortie&nbsp;:</b> tables <code>process_templates</code> / <code>process_steps</code> remplies, chaque durée justifiée.</p></div>
+
+<div class="phase"><h3>Phase 6 — État de l'information (fog of war)</h3>
+<p>Pour chaque décision majeure&nbsp;: reconstituer ce que le décideur savait, quand, et par quel canal (table <code>knowledge_states</code> alimentée par les messages). Indispensable pour F3&nbsp;: on ne peut juger une décision qu'à l'aune de l'information disponible. <b>Critère de sortie&nbsp;:</b> les ~15 décisions majeures (§7.2) documentées avec leur contexte informationnel.</p></div>
+
+<div class="phase"><h3>Phase 7 — Validation du replay puis moteur de simulation</h3>
+<p>Rejouer F1 et vérifier que les événements reconstruits respectent la physique du modèle (un raid ne vole pas plus vite que son avion le plus lent&nbsp;; un pont ne lance pas pendant qu'il récupère). Toute violation = erreur de données ou de modèle, à arbitrer. Ensuite seulement&nbsp;: moteur de simulation (§11). <b>Critère de sortie&nbsp;:</b> replay complet sans violation de contrainte, écarts résiduels documentés.</p></div>
+
+<h2 id="s4">4. Corpus de sources et protocole de vérification</h2>
+
+<h3>4.1 Grades de fiabilité</h3>
+<table>
+  <tr><th>Grade</th><th>Définition</th><th>Exemples</th></tr>
+  <tr><td><span class="grade gA">A</span></td><td>Source primaire officielle contemporaine</td><td>Rapports d'action (action reports) des navires et task forces US&nbsp;; rapport officiel de Nagumo (traduction OPNAV «&nbsp;Japanese Story of the Battle of Midway&nbsp;»)&nbsp;; journaux de bord&nbsp;; messages radio archivés&nbsp;; rapport CINCPAC serial 01849</td></tr>
+  <tr><td><span class="grade gB">B</span></td><td>Étude savante moderne croisant les primaires</td><td>Parshall &amp; Tully <i>Shattered Sword</i> (2005, référence côté japonais)&nbsp;; Lundstrom <i>The First Team</i> (opérations des chasseurs US, minute par minute)&nbsp;; Cressman et al. <i>A Glorious Page in Our History</i>&nbsp;; Symonds <i>The Battle of Midway</i>&nbsp;; Senshi Sōsho (histoire officielle japonaise)</td></tr>
+  <tr><td><span class="grade gC">C</span></td><td>Source secondaire classique ou base en ligne sérieuse</td><td>Morison&nbsp;; combinedfleet.com (TROMs des navires japonais)&nbsp;; midway1942.org / Battle of Midway Roundtable&nbsp;; Naval History &amp; Heritage Command</td></tr>
+  <tr><td><span class="grade gD">D</span></td><td>Témoignage tardif ou source réputée problématique</td><td>Fuchida <i>Midway</i> (1955)&nbsp;: récit largement réfuté sur des points clés (voir 4.3)&nbsp;; mémoires tardives non recoupées&nbsp;; Wikipédia (utilisable comme index, jamais comme source finale)</td></tr>
+</table>
+
+<h3>4.2 Protocole de vérification</h3>
+<p>Règle&nbsp;: toute donnée entrant dans la simulation (heure, position, effectif, durée, caractéristique) est saisie comme <code>claim</code> rattachée à sa source, son grade et sa valeur d'origine (heure dans le référentiel d'origine, position en degrés-minutes). La valeur retenue est choisie selon&nbsp;: (1)&nbsp;grade le plus élevé&nbsp;; (2)&nbsp;en cas de conflit entre grades égaux, cohérence physique avec les événements voisins&nbsp;; (3)&nbsp;arbitrage documenté dans <code>resolution_note</code>. Un champ <code>status</code> (verified / single_source / conflicting / estimated / gap) rend l'état de vérification requêtable&nbsp;— on saura à tout moment quelle part de la base est solide.</p>
+
+<h3>4.3 Controverses connues à traiter explicitement</h3>
+<table>
+  <tr><th>Controverse</th><th>Enjeu pour la simulation</th></tr>
+  <tr><td><b>Les «&nbsp;cinq minutes fatales&nbsp;» de Fuchida</b>&nbsp;: l'idée que les ponts japonais étaient couverts d'avions prêts à décoller à 10h20 est réfutée par Parshall &amp; Tully (les frappes étaient encore en hangar, la CAP monopolisait les ponts)</td><td>Change radicalement l'état initial des ponts/hangars au moment des impacts — donnée d'entrée majeure du modèle d'ordonnancement</td></tr>
+  <tr><td><b>Cap du groupe aérien du Hornet</b> («&nbsp;flight to nowhere&nbsp;»)&nbsp;: 240° officiel vs ~265° selon plusieurs reconstitutions</td><td>Impacte la trajectoire reconstruite, la perte de VT-8 isolé, et le contre-factuel «&nbsp;que se passe-t-il si le Hornet attaque&nbsp;?&nbsp;»</td></tr>
+  <tr><td><b>Chronologie exacte des ordres de réarmement de Nagumo</b> (07h15 ordre, 07h45 suspension) et état d'avancement réel à chaque instant</td><td>C'est LE cas d'école du contre-factuel F3&nbsp;; nécessite la meilleure reconstruction possible des cycles hangar</td></tr>
+  <tr><td><b>Retard du lancement de l'hydravion n°4 du Tone</b> et son rôle réel (le retard a paradoxalement placé l'avion au bon endroit)</td><td>Pivot informationnel&nbsp;: conditionne l'heure de détection de TF-16/17 par les Japonais</td></tr>
+  <tr><td><b>Positions des contacts PBY</b> (erreurs d'estime ~30–40&nbsp;nm)</td><td>À stocker en double&nbsp;: position <i>rapportée</i> (ce que croyaient les décideurs) et position <i>réelle reconstruite</i></td></tr>
+</table>
+<div class="note">Ces cas justifient le double registre <i>monde réel / monde perçu</i>&nbsp;: la table <code>contact_reports</code> stocke la position rapportée, la table <code>positions</code> la position reconstruite. La fonction F2 (décision optimale) doit pouvoir tourner dans les deux modes&nbsp;: information parfaite et information historique.</div>
+
+<h2 id="s5">5. Modèle conceptuel de données</h2>
+<p>Le schéma complet est livré dans <code>schema_midway.sql</code> et instancié dans <code>midway.sqlite</code>. Vue d'ensemble&nbsp;:</p>
+<pre>
+RÉFÉRENTIEL STATIQUE                 DYNAMIQUE (le film)                MODÈLE (la physique)
+────────────────────                 ───────────────────                ─────────────────────
+sources                              events ──── event_participants     process_templates
+claims (multi-sourçage)              positions (pistes navires/raids)   process_steps
+ships ── carrier_constraints         missions (raids) ── mission_legs   constraint_params
+aircraft_types ── ordnance_types     contact_reports (monde perçu)
+squadrons (effectifs, rattachement)  messages (comms, délais)
+persons (chaîne de commandement)     decisions ── knowledge_states
+formations (TF, kōkūsentai)          squadron_status (état /15 min)
+weather_zones                        damage_states (avaries)
+</pre>
+<table>
+  <tr><th>Table</th><th>Rôle</th><th>Champs clés</th></tr>
+  <tr><td><code>sources</code> / <code>claims</code></td><td>Sourçage et arbitrage de chaque donnée</td><td>grade, valeur d'origine + référentiel, valeur retenue, status, resolution_note</td></tr>
+  <tr><td><code>ships</code></td><td>Tous les navires impliqués (~80)</td><td>classe, camp, formation, vitesse max, rôle&nbsp;; Midway = pseudo-navire</td></tr>
+  <tr><td><code>carrier_constraints</code></td><td>Contraintes physiques des 7 CV + Midway</td><td>dimensions pont, ascenseurs, capacité de spot, équipes armement/carburant, doctrine (réarmement en hangar vs sur pont)</td></tr>
+  <tr><td><code>aircraft_types</code> / <code>ordnance_types</code></td><td>Fiches techniques des ~12 types</td><td>vitesses, rayon d'action, carburant, emports possibles, équipage</td></tr>
+  <tr><td><code>squadrons</code></td><td>Unité de simulation aérienne</td><td>navire-mère, type d'avion, effectif au 04/06 04h00, commandant, qualification (nuit, torpille)</td></tr>
+  <tr><td><code>events</code></td><td>Colonne vertébrale chronologique</td><td>ts (GMT−12), incertitude, type (énuméré), participants, phase</td></tr>
+  <tr><td><code>positions</code></td><td>Pistes reconstruites (monde réel)</td><td>ts, lat/lon, cap, vitesse, méthode (observed/interpolated/estimated), erreur_nm</td></tr>
+  <tr><td><code>contact_reports</code></td><td>Monde perçu (fog of war)</td><td>position rapportée, contenu du message, délais émission→réception→décideur</td></tr>
+  <tr><td><code>missions</code> / <code>mission_legs</code></td><td>Chaque raid&nbsp;: composition (escadrilles), cap, altitude, résultat</td><td>heures de lancement (début/fin), navigation, attaque, récupération, pertes</td></tr>
+  <tr><td><code>decisions</code> / <code>knowledge_states</code></td><td>Support de F3</td><td>décideur, heure, options identifiées, information disponible, décision prise, conséquences</td></tr>
+  <tr><td><code>squadron_status</code></td><td>État de chaque escadrille par pas de temps</td><td>localisation (pont/hangar/en vol), armement courant, carburant, disponibles/endommagés</td></tr>
+  <tr><td><code>process_templates</code> / <code>process_steps</code></td><td>Physique de l'ordonnancement</td><td>ex.&nbsp;: «&nbsp;réarmement B5N torpille→bombe&nbsp;»&nbsp;: 6 étapes, durées min/typ/max, ressources consommées (ascenseur, équipe)</td></tr>
+  <tr><td><code>position_inferences</code> <span class="meta">(ajout v2)</span></td><td>Journal du moteur d'inférence&nbsp;: chaque position confrontée aux contraintes (ancres d'épaves, temps de vol aller/retour, vitesses, résidus des contacts)</td><td>contrainte utilisée, attendu vs observé, résidu, action (ok/flagged/adjusted), justification rédigée et sourcée</td></tr>
+  <tr><td><code>replay_findings</code> <span class="meta">(ajout v2)</span></td><td>Verdicts du moteur F1 (replay à travers le modèle)</td><td>opération historique, valeur modèle, verdict (coherent/tension/incoherent/counterfactual), marge en minutes</td></tr>
+</table>
+<div class="note"><b>Convention de causalité des mouvements (v2).</b> Chaque waypoint de <code>positions</code> porte un <code>cause_event_id</code>&nbsp;: l'événement (ordre, décision, avarie) qui justifie son <b>segment sortant</b>. Tout virage doit donc être un waypoint à part entière, et l'audit (règles M1/N1) refuse les waypoints sans cause et les caps consignés incohérents avec la route effective (±45°). Les changements de cap historiques sont des <i>événements</i>&nbsp;; les ajustements de reconstruction sont des <i>inférences</i> tracées dans <code>position_inferences</code> et <code>claims</code> — on ne mélange jamais les deux. Autre distinction structurante&nbsp;: les navires frappés quittent la piste de leur <i>formation</i> et reçoivent leur propre piste de dérive (point d'impact → épave).</div>
+
+<h2 id="s6">6. Inventaire des contraintes, unité par unité</h2>
+<div class="note">Les valeurs ci-dessous sont des <b>valeurs initiales de travail</b> (grade B/C, à vérifier en Phase 2 — c'est précisément l'objet du protocole §4.2). Elles montrent la structure de saisie attendue. Effectifs = appareils opérationnels au matin du 4 juin, hors hydravions des croiseurs.</div>
+
+<h3>6.1 Porte-avions japonais (Kidō Butai, 1er Kōkū Kantai — Nagumo)</h3>
+<table>
+  <tr><th>Navire</th><th>Pont d'envol</th><th>Ascenseurs</th><th>Vitesse</th><th>Groupe aérien (≈)</th><th>Contraintes spécifiques</th></tr>
+  <tr><td><b>Akagi</b> (navire amiral)</td><td>~249 m</td><td>3</td><td>31 nds</td><td>18 A6M2 + 18 D3A1 + 18 B5N2 (+ Zeros du 6e Kōkūtai en transit)</td><td>Île à bâbord (cas rare)&nbsp;; doctrine IJN&nbsp;: réarmement en hangar (pas sur le pont), ce qui allonge les cycles et explique la vulnérabilité hangars pleins</td></tr>
+  <tr><td><b>Kaga</b></td><td>~248 m</td><td>3</td><td>28 nds (la plus lente — contraint la manœuvre de la force)</td><td>18 A6M2 + 18 D3A1 + 27 B5N2</td><td>Plus grand groupe aérien&nbsp;; vitesse limite le vent apparent disponible au lancement</td></tr>
+  <tr><td><b>Sōryū</b></td><td>~217 m</td><td>3</td><td>34,5 nds</td><td>18 A6M2 + 16 D3A1 + 18 B5N2 + 2 D4Y1 (reco)</td><td>Pont plus court → spot maximal réduit&nbsp;; porte les 2 seuls D4Y (reconnaissance rapide)</td></tr>
+  <tr><td><b>Hiryū</b></td><td>~217 m</td><td>3</td><td>34,3 nds</td><td>18 A6M2 + 18 D3A1 + 18 B5N2</td><td>Île à bâbord&nbsp;; seul CV survivant après 10h26 → toutes les frappes japonaises de l'après-midi reposent sur lui (cas limite d'ordonnancement mono-pont)</td></tr>
+</table>
+<p class="meta">Escorte à modéliser (positions, DCA, hydravions de reco)&nbsp;: BB Haruna, Kirishima&nbsp;; CA Tone, Chikuma (hydravions E13A/E8N — la reco n°4 du Tone est un acteur clé)&nbsp;; CL Nagara&nbsp;; 12 destroyers.</p>
+
+<h3>6.2 Porte-avions américains</h3>
+<table>
+  <tr><th>Navire</th><th>Pont d'envol</th><th>Ascenseurs</th><th>Vitesse</th><th>Groupe aérien (≈)</th><th>Contraintes spécifiques</th></tr>
+  <tr><td><b>Enterprise</b> (TF-16, Spruance)</td><td>~246 m</td><td>3</td><td>32,5 nds</td><td>VF-6 (27 F4F-4), VB-6 (~19 SBD), VS-6 (~19 SBD), VT-6 (14 TBD)</td><td>Doctrine US&nbsp;: réarmement/ravitaillement possible sur le pont → cycles plus courts mais pont encombré&nbsp;; lancement déferré du 4 juin matin (départ échelonné des escadrilles)</td></tr>
+  <tr><td><b>Hornet</b> (TF-16)</td><td>~246 m</td><td>3</td><td>32,5 nds</td><td>VF-8 (27 F4F-4), VB-8 (~19 SBD), VS-8 (~18 SBD), VT-8 (15 TBD)</td><td>Groupe aérien inexpérimenté&nbsp;; cap de sortie controversé (§4.3)&nbsp;; VT-8 détruit en totalité (1 survivant)</td></tr>
+  <tr><td><b>Yorktown</b> (TF-17, Fletcher)</td><td>~246 m</td><td>3</td><td>~30 nds (réparations de la mer de Corail en 72h)</td><td>VF-3 (25 F4F-4), VB-3 (18 SBD), VS-5 (~19 SBD), VT-3 (~13 TBD)</td><td>Groupe aérien composite (escadrilles de 3 porte-avions)&nbsp;; état structurel dégradé&nbsp;; cible des 2 frappes du Hiryū&nbsp;; sabordé... coulé par I-168 le 7 juin</td></tr>
+</table>
+
+<h3>6.3 Midway — le «&nbsp;porte-avions insubmersible&nbsp;»</h3>
+<table>
+  <tr><th>Paramètre</th><th>Valeur de travail</th></tr>
+  <tr><td>Unités basées</td><td>VMF-221 (~21 F2A-3 + 7 F4F-3), VMSB-241 (~16 SBD-2 + 11 SB2U-3), dét. VT-8 (6 TBF-1), 4 B-26 (torpilles), ~17 B-17E, ~31 PBY-5/5A (Sand Island et Eastern Island)</td></tr>
+  <tr><td>Contraintes</td><td>Pistes fixes (pas de vent apparent généré)&nbsp;; impossible à couler mais neutralisable&nbsp;; rayon d'action des PBY (~700 nm) structure le plan de recherche&nbsp;; coordination inter-armes (USAAF/USN/USMC) quasi inexistante → frappes décousues du matin du 4 juin</td></tr>
+</table>
+
+<h3>6.4 Autres formations à inclure (périmètre 3–7 juin)</h3>
+<table>
+  <tr><th>Formation</th><th>Unités principales</th><th>Rôle dans la simulation</th></tr>
+  <tr><td>Force d'invasion + soutien rapproché (Kondō / Kurita)</td><td>Transports&nbsp;; CA Mogami, Mikuma, Suzuya, Kumano + escorte</td><td>Frappes US des 3, 5 et 6 juin&nbsp;; collision Mogami/Mikuma (manœuvre d'évitement du sous-marin Tambor, nuit du 4 au 5)&nbsp;; Mikuma coulé le 6</td></tr>
+  <tr><td>Corps principal (Yamamoto)</td><td>BB Yamato, Nagato, Mutsu + escorte</td><td>Hors de portée — pèse sur les décisions japonaises (tentative de bataille de nuit du 4 au 5), peu sur la cinématique</td></tr>
+  <tr><td>Sous-marins</td><td>JP&nbsp;: cordons K et I-168&nbsp;; US&nbsp;: Tambor, Nautilus, etc. (~19)</td><td>I-168 torpille Yorktown + Hammann (6 juin)&nbsp;; Nautilus harcèle la Kidō Butai&nbsp;; Tambor déclenche la collision des croiseurs</td></tr>
+  <tr><td>Pétroliers / ravitaillement</td><td>Cyclone des deux camps</td><td>Contrainte carburant des destroyers — limite réelle de la poursuite US les 5–6 juin</td></tr>
+</table>
+
+<h3>6.5 Types d'avions — paramètres requis par type</h3>
+<table>
+  <tr><th>Type</th><th>Rôle</th><th>Paramètres à renseigner (chacun = 1 claim sourcée)</th></tr>
+  <tr><td>A6M2 Zero, F4F-4 Wildcat, F2A-3 Buffalo</td><td>Chasse / CAP</td><td rowspan="4">vitesse de croisière et max&nbsp;; rayon de combat selon profil et emport&nbsp;; capacité carburant et consommation (croisière / combat)&nbsp;; emports possibles (table <code>ordnance_types</code>&nbsp;: torpille Type 91, bombes 800/250/60 kg, Mk13, 1000/500 lb)&nbsp;; équipage&nbsp;; temps de montée&nbsp;; plafond&nbsp;; vitesse de largage max (la Mk13 exigeait largage lent et bas → vulnérabilité des TBD)&nbsp;; durées de réarmement par configuration</td></tr>
+  <tr><td>D3A1 Val, SBD-2/3 Dauntless, SB2U-3 Vindicator</td><td>Bombardement en piqué</td></tr>
+  <tr><td>B5N2 Kate, TBD-1 Devastator, TBF-1 Avenger, B-26</td><td>Torpillage / bombardement horizontal</td></tr>
+  <tr><td>PBY-5/5A Catalina, E13A Jake, E8N Dave, D4Y1, B-17E</td><td>Recherche / reco / bombardement haute altitude</td></tr>
+</table>
+
+<h2 id="s7">7. Chronologie — structure et points d'ancrage</h2>
+
+<h3>7.1 Typologie des événements</h3>
+<p>Énumération fermée (champ <code>event_type</code>)&nbsp;: <code>sighting</code> (détection), <code>report</code> (émission de message), <code>receipt</code> (réception), <code>decision</code> (ordre), <code>launch_start</code> / <code>launch_end</code>, <code>recovery_start</code> / <code>recovery_end</code>, <code>spot</code> (préparation du pont), <code>rearm_start</code> / <code>rearm_end</code>, <code>attack</code>, <code>hit</code> / <code>miss</code>, <code>damage</code>, <code>fire</code>, <code>sinking</code> / <code>scuttling</code>, <code>course_change</code>, <code>collision</code>, <code>refuel</code>, <code>weather_obs</code>.</p>
+
+<h3>7.2 Ancres chronologiques majeures (échantillon — heures locales Midway, GMT−12)</h3>
+<div class="note">Liste de démarrage (~60 ancres au total en Phase 3, ici les principales). Chaque heure ci-dessous doit être confirmée par ≥&nbsp;2 sources avant passage en <code>verified</code>. Incertitudes typiques&nbsp;: ±1–5&nbsp;min côté US (rapports d'action), ±5–15&nbsp;min côté japonais (reconstruction post-bataille, journaux perdus dans les incendies).</div>
+<table>
+  <tr><th>Date/heure</th><th>Événement</th><th>Grade init.</th></tr>
+  <tr><td>03/06 ~09:00</td><td>PBY (Ens. Reid) repère la force d'invasion à ~700 nm O-SO de Midway («&nbsp;Main Body&nbsp;» — erreur d'identification typique à stocker comme telle)</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>03/06 ap.-midi</td><td>9 B-17 attaquent les transports — aucun coup au but (à modéliser&nbsp;: inefficacité du bombardement horizontal sur cibles manœuvrantes)</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 01:43</td><td>4 PBY attaquent de nuit à la torpille&nbsp;; pétrolier Akebono Maru touché</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 04:30</td><td>Kidō Butai lance la frappe sur Midway&nbsp;: 108 appareils (36 B5N niveau, 36 D3A, 36 A6M) sous Tomonaga&nbsp;; simultanément, lancement (incomplet et tardif) des 7 hydravions de recherche</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 05:34–05:52</td><td>PBY signalent «&nbsp;enemy carriers&nbsp;» puis «&nbsp;two carriers and battleships&nbsp;» 180 nm de Midway, relèvement 320 — position erronée de ~40 nm</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 06:16–06:30</td><td>VMF-221 intercepte (pertes majeures)&nbsp;; frappe de Tomonaga sur Midway</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 07:00</td><td>Message de Tomonaga&nbsp;: «&nbsp;une seconde frappe est nécessaire&nbsp;»</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 07:05–08:20</td><td>Attaques décousues depuis Midway (6 TBF + 4 B-26, puis VMSB-241, B-17, SB2U) — aucune touche, mais pression continue sur la CAP et les ponts japonais</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 07:06</td><td>TF-16 commence à lancer (Enterprise/Hornet)&nbsp;; lancement long (~1h) → escadrilles séparées en route</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 07:15</td><td><b>Décision D1 (Nagumo)&nbsp;:</b> réarmer les B5N (torpilles → bombes terrestres) pour une 2e frappe sur Midway</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 07:28</td><td>Hydravion n°4 du Tone (parti en retard) signale «&nbsp;10 navires ennemis&nbsp;»&nbsp;; reçu vers 07:45–08:00 par Nagumo</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 07:45</td><td><b>Décision D2 (Nagumo)&nbsp;:</b> suspendre le réarmement&nbsp;; demande de précision au Tone n°4</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 08:20</td><td>Tone n°4&nbsp;: «&nbsp;l'ennemi semble accompagné d'un porte-avions&nbsp;» — le pivot informationnel de la bataille</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 08:37–09:10</td><td>Récupération de la frappe de Tomonaga (ponts monopolisés)&nbsp;; <b>Décision D3 (Nagumo, ~08:55)&nbsp;:</b> récupérer d'abord, puis frapper en force constituée — refus de la frappe immédiate proposée par Yamaguchi (la fenêtre de ~65 min)</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 09:17</td><td>Kidō Butai change de cap au NE vers les porte-avions US</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 09:20–10:00</td><td>VT-8 (15 TBD, tous abattus) puis VT-6 (14 TBD, 10 perdus) attaquent sans escorte ni résultat — mais désorganisent la CAP et empêchent tout spot de frappe</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 10:00–10:15</td><td>VT-3 attaque (avec VF-3)&nbsp;; la CAP japonaise est tirée à basse altitude</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 10:22–10:26</td><td>VB-6/VS-6 (McClusky, après la décision de prolonger la recherche et l'indice du destroyer Arashi) frappent Kaga et Akagi&nbsp;; VB-3 (Leslie) frappe Sōryū — 3 CV en flammes en ~4 minutes</td><td><span class="grade gA">A</span></td></tr>
+  <tr><td>04/06 10:54</td><td>Hiryū lance sa 1re frappe (18 D3A + 6 A6M, Kobayashi)</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 12:05–12:20</td><td>Yorktown touché par 3 bombes&nbsp;; remis en route à ~19 nds (les réparations brouillent l'identification japonaise&nbsp;: «&nbsp;2 porte-avions touchés&nbsp;»)</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 13:31</td><td>Hiryū lance sa 2e frappe (10 B5N + 6 A6M, Tomonaga — sans réservoir plein, aller simple assumé)</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 14:30–14:45</td><td>Yorktown touché par 2 torpilles — abandonné</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 17:00–17:05</td><td>24 SBD (Enterprise, incl. ex-Yorktown) frappent le Hiryū — 4 coups</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>04/06 19:13–19:25</td><td>Sabordage/naufrage de Sōryū puis Kaga</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>05/06 ~02:55</td><td>Yamamoto annule l'opération MI&nbsp;; retraite générale</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>05/06 05:00 / 09:12</td><td>Sabordage Akagi / naufrage Hiryū</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>05/06 ~02:15</td><td>Tambor aperçu par la force de Kurita → manœuvre d'urgence → collision Mogami/Mikuma</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>06/06 journée</td><td>3 frappes de TF-16 sur Mogami/Mikuma&nbsp;; Mikuma coule&nbsp;; ~13:36 I-168 torpille Yorktown (2) et Hammann (1, coule en 4 min)</td><td><span class="grade gB">B</span></td></tr>
+  <tr><td>07/06 ~07:00</td><td>Le Yorktown chavire et coule</td><td><span class="grade gB">B</span></td></tr>
+</table>
+
+<h3>7.3 Décisions majeures à instrumenter pour F3 (table <code>decisions</code>)</h3>
+<p>Côté japonais&nbsp;: plan de recherche du matin (7 hydravions, une seule phase — D0)&nbsp;; D1 réarmement 07:15&nbsp;; D2 suspension 07:45&nbsp;; D3 «&nbsp;récupérer d'abord&nbsp;» ~08:55 (vs frapper immédiatement avec ce qui est prêt — la proposition Yamaguchi)&nbsp;; choix de cible des 2 frappes du Hiryū&nbsp;; tentative d'engagement nocturne puis annulation (Yamamoto). Côté US&nbsp;: heure et distance de lancement de TF-16 (~07:00, à ~155 nm — limite des TBD)&nbsp;; lancement groupé vs déferré&nbsp;; cap du Hornet&nbsp;; décision de McClusky de prolonger la recherche puis virer nord&nbsp;; rétention de la moitié des SBD par Fletcher (VS-5)&nbsp;; refus de Spruance de poursuivre à l'ouest la nuit du 4 (vs risque de bataille de nuit contre le Yamato)&nbsp;; gestion du remorquage du Yorktown.</p>
+
+<h2 id="s8">8. Positions et cartographie</h2>
+<p><b>Objectif F1&nbsp;:</b> à tout instant t (pas de 1 min, interpolation), la carte affiche chaque formation navale et chaque raid en vol, avec halo d'incertitude.</p>
+<table>
+  <tr><th>Source de position</th><th>Nature</th><th>Traitement</th></tr>
+  <tr><td>Journaux de bord / rapports d'action (positions à heures fixes, points de lancement)</td><td>Attestée (estime du bord)</td><td>Point <code>observed</code>, erreur 5–20 nm</td></tr>
+  <tr><td>Rapports de contact (PBY, hydravions, sous-marins)</td><td>Perçue — souvent fausse</td><td>Stockée dans <code>contact_reports</code> (monde perçu)&nbsp;; la position vraie de la cible vient de la piste reconstruite de la cible elle-même</td></tr>
+  <tr><td>Cartes des études modernes (Shattered Sword, cartes du CINCPAC)</td><td>Reconstruction</td><td>Points <code>estimated</code> avec source&nbsp;; numérisation des cartes (géoréférencement) en Phase 4</td></tr>
+  <tr><td>Épaves localisées (Kaga 2019, Akagi 2019/2023, Yorktown 1998)</td><td>Vérité terrain unique</td><td>Points <code>verified</code> — ancrage fort des trajectoires finales&nbsp;; positions publiées par les expéditions (R/V Petrel, Nautilus/NOAA)</td></tr>
+  <tr><td>Interpolation</td><td>Calculée</td><td>Entre points attestés, contrainte par vitesse max, rayon de giration, caps ordonnés connus, et obligations physiques (lancer face au vent → remontée au SE par vent d'est typique ce jour-là)</td></tr>
+</table>
+<div class="note"><b>Contrainte de cohérence exploitable&nbsp;:</b> chaque lancement/récupération impose cap au vent à ~25–30 nds de vent apparent. Connaissant le vent (faible, E/SE le 4 juin) et les heures d'opérations aériennes, on contraint fortement les trajectoires — c'est un des meilleurs outils de validation croisée des positions.</div>
+
+<h2 id="s9">9. Modèle des processus (paramétrage de la physique)</h2>
+<p>Chaque processus est un gabarit (<code>process_template</code>) décomposé en étapes avec durées min/typique/max et ressources consommées. Exemples à paramétrer en Phase 5&nbsp;:</p>
+<table>
+  <tr><th>Processus</th><th>Étapes / paramètres</th><th>Ressources critiques</th></tr>
+  <tr><td>Réarmement escadrille B5N torpille→bombe (et inverse)</td><td>Descente hangar (ascenseur), dépose torpille, transfert munitions, pose bombe 800 kg, contrôles, arrimage — soulevé&nbsp;: par avion ~20–30 min avec équipes complètes&nbsp;; goulot = chariots et équipes, pas l'outillage. L'inverse (bombe→torpille, décision D2) est plus lent&nbsp;: torpilles remontées des soutes</td><td>Ascenseurs, équipes d'armement (nombre fini par CV), espace hangar</td></tr>
+  <tr><td>Spot + lancement d'une frappe complète (pont japonais)</td><td>Remontée + positionnement ~40–45 min pour une frappe de pont complet&nbsp;; lancement ~15–20 s/avion&nbsp;; le pont est indisponible pour la CAP pendant le spot</td><td>Pont (ressource exclusive), ascenseurs</td></tr>
+  <tr><td>Récupération</td><td>~30–40 s/avion en conditions calmes&nbsp;; crash = pont bloqué&nbsp;; les avions récupérés doivent être dégagés (parc avant ou descente hangar)</td><td>Pont, barrières, ascenseurs</td></tr>
+  <tr><td>Rotation CAP</td><td>Endurance A6M en combat&nbsp;; réapprovisionnement munitions 20 mm (rapide mais consomme le pont)&nbsp;; le harcèlement continu du matin du 4 juin a saturé ce cycle — phénomène central à reproduire</td><td>Pont, carburant, pilotes</td></tr>
+  <tr><td>Communications</td><td>Délais émission→réception→déchiffrement→décideur (10–40 min côté japonais pour les rapports d'hydravions)&nbsp;; fiabilité radio des chasseurs japonais quasi nulle (coordination CAP visuelle)</td><td>—</td></tr>
+  <tr><td>Carburant navires</td><td>Consommation à 25–30 nds vs croisière&nbsp;; rayon des destroyers = contrainte dure de la poursuite US</td><td>Pétroliers</td></tr>
+</table>
+
+<h2 id="s10">10. Validation du replay (avant tout moteur de simulation)</h2>
+<p>Le replay F1 sert de banc de test du modèle&nbsp;: on rejoue la réalité <i>à travers</i> le modèle de contraintes et toute impossibilité signale une erreur. Tests automatisables&nbsp;: vitesse sol des raids ≤ vitesse de croisière du type le plus lent ±10&nbsp;%&nbsp;; autonomie ≥ distance parcourue (sinon&nbsp;: amerrissages — qui sont effectivement attestés, ex. retours de VF-6)&nbsp;; un pont ne peut pas lancer et récupérer simultanément&nbsp;; une escadrille ne peut être qu'à un endroit&nbsp;; les heures de réception ≥ heures d'émission&nbsp;; cohérence positions/relèvements des contacts réciproques. Indicateurs de complétude&nbsp;: % de claims <code>verified</code>, trous chronologiques résiduels, erreur de fermeture des trajectoires sur les positions d'épaves.</p>
+<h3>10.1 Outillage implémenté (v2)</h3>
+<table>
+  <tr><th>Outil</th><th>Rôle</th><th>État</th></tr>
+  <tr><td><code>audit_coherence.py</code></td><td>13 familles de règles (ordre temporel, vitesses, rayons, engagements simultanés, causalité M1/N1, sourçage…)&nbsp;; un FAIL bloque le pipeline</td><td>0 FAIL / 0 WARN sur la base courante</td></tr>
+  <tr><td><code>inferer_positions.py</code></td><td>Confronte chaque position aux contraintes physiques et journalise tout (<code>position_inferences</code>)&nbsp;; a notamment détecté l'erreur formation/dérive des CV frappés et quantifié les erreurs d'estime des contacts (Tone n°4&nbsp;: ~45-50 nm)</td><td>~60 contraintes vérifiées, 0 violation</td></tr>
+  <tr><td><code>simulateur_f1.py</code></td><td>Rejoue le 4 juin dans le modèle de pont&nbsp;: 13 vérifications dont les bornes contre-factuelles clés (1er lancement anti-navire faisable&nbsp;: 10h15 optimiste / 10h48 réaliste — les SBD de 10h22 battent tout scénario réaliste&nbsp;; option Yamaguchi&nbsp;: frappe sur les TF US ~10h30)</td><td><code>rapport_f1.md</code>&nbsp;; verdicts en base</td></tr>
+  <tr><td><code>generer_carte.py</code></td><td>Carte de replay autonome (thèmes, zoom, combats animés, états en feu/coulé, waypoints cliquables avec justification du cap, monde perçu, fil interactif)&nbsp;; tampon de build = empreinte SHA-1 de la base</td><td>synchronisée par le pipeline</td></tr>
+  <tr><td><code>tout_regenerer.sh</code></td><td>Pipeline complet&nbsp;: rebuild SQL → inférence → F1 → audit (bloquant) → carte</td><td>commande unique après toute modification</td></tr>
+</table>
+<div class="note"><b>Leçon de la Phase 8 (dépouillement des rapports d'action)&nbsp;:</b> les sources primaires elles-mêmes contiennent des erreurs — le rapport du Yorktown situe son naufrage à 167°24'W, position physiquement impossible (remorquage 2-3 nds)&nbsp;: transposition probable de 176°24'W, arbitrée par la contrainte de dérive et tracée dans <code>claims</code> (statut <code>conflicting</code>). La hiérarchie des grades ne dispense jamais de l'arbitrage physique.</div>
+
+<h2 id="s11">11. Architecture cible du programme (esquisse)</h2>
+<p>La simulation à événements discrets (DES) est l'approche naturelle&nbsp;: l'état n'évolue qu'aux événements (fin d'étape de réarmement, arrivée d'un raid, réception d'un message), ce qui colle exactement au modèle de données. Couches&nbsp;: (1)&nbsp;BDD SQLite = vérité historique + paramètres&nbsp;; (2)&nbsp;moteur d'état (navires, escadrilles, ressources de pont) rejouable en mode «&nbsp;historique&nbsp;» (F1, piloté par <code>events</code>) ou «&nbsp;simulé&nbsp;» (F2/F3, piloté par les décisions)&nbsp;; (3)&nbsp;module décisionnel — pour F2, l'ordonnancement des ponts se formule comme un problème de type job-shop avec ressources (solveur par contraintes, ex. CP-SAT, ou heuristiques + Monte-Carlo pour l'incertitude)&nbsp;; pour F3, on modifie une décision dans <code>decisions</code> et le moteur repart en mode simulé à partir de cet instant, le reste du monde suivant le modèle&nbsp;; (4)&nbsp;rendu carte 2D (échelle exacte, curseur temporel, halos d'incertitude, mode «&nbsp;perçu par chaque camp&nbsp;»).</p>
+<div class="alerte"><b>Garde-fou méthodologique&nbsp;:</b> F2/F3 exigent un modèle stochastique des résultats de combat (probabilités de touche, attrition CAP/DCA) calibré sur les engagements historiques de 1942 (Coral Sea incluse), faute de quoi le contre-factuel produira des certitudes illusoires. Prévoir des sorties en distributions (N répétitions Monte-Carlo), jamais en résultat unique.</div>
+
+<h2 id="s12">12. Plan de travail — checklist de complétion de la BDD</h2>
+<p class="meta"><b>État v2&nbsp;:</b> tâches 1-6 et 10-12 <b>faites en valeurs de travail</b> (premier remplissage complet, vérification 2 sources en cours)&nbsp;;
+tâche 8 partielle (fixes des rapports d'action saisis&nbsp;; géoréférencement des cartes restant)&nbsp;;
+tâche 9 faite pour les pistes navales et 59 trajets aériens (recherches incluses&nbsp;; CAP et sous-marins restants)&nbsp;;
+tâche 13 <b>faite et automatisée</b> (audit + inférence + moteur F1). Le reste à faire principal est la tâche 7
+(densification) et la montée du sourçage&nbsp;: 17/61 claims vérifiées, 23/79 événements sourcés.</p>
+<table>
+  <tr><th>#</th><th>Tâche</th><th>Phase</th><th>Tables alimentées</th></tr>
+  <tr><td>1</td><td>Saisir la bibliothèque de sources et leurs grades</td><td>1</td><td>sources</td></tr>
+  <tr><td>2</td><td>OOB complet des deux camps (navires, formations, commandants)</td><td>2</td><td>ships, formations, persons</td></tr>
+  <tr><td>3</td><td>Contraintes physiques des 7 CV + Midway (2 sources/valeur)</td><td>2</td><td>carrier_constraints, claims</td></tr>
+  <tr><td>4</td><td>Fiches des ~12 types d'avions + munitions</td><td>2</td><td>aircraft_types, ordnance_types, claims</td></tr>
+  <tr><td>5</td><td>Effectifs des escadrilles au 04/06 04h00</td><td>2</td><td>squadrons, claims</td></tr>
+  <tr><td>6</td><td>60 ancres chronologiques vérifiées (≥2 sources)</td><td>3</td><td>events, claims</td></tr>
+  <tr><td>7</td><td>Densification chronologique (objectif&nbsp;: pas de trou &gt;30 min le 4 juin)</td><td>3</td><td>events, messages, contact_reports</td></tr>
+  <tr><td>8</td><td>Positions attestées + géoréférencement des cartes de référence</td><td>4</td><td>positions</td></tr>
+  <tr><td>9</td><td>Interpolation des pistes + reconstruction des trajets de raids</td><td>4</td><td>positions, mission_legs</td></tr>
+  <tr><td>10</td><td>Paramétrage des processus (réarmement, spot, récupération, CAP, comms)</td><td>5</td><td>process_templates, process_steps</td></tr>
+  <tr><td>11</td><td>États successifs des escadrilles (pas de 15 min, journée du 4)</td><td>5</td><td>squadron_status</td></tr>
+  <tr><td>12</td><td>15 décisions majeures + états d'information associés</td><td>6</td><td>decisions, knowledge_states</td></tr>
+  <tr><td>13</td><td>Tests de cohérence automatiques + rapport de complétude</td><td>7</td><td>(requêtes de validation)</td></tr>
+</table>
+
+</main>
+<footer>
+Midway 1942 — document méthodologique <b>v2</b> · 12 juin 2026 · Livré avec <code>schema_midway.sql</code> + 15 fichiers de phases, <code>midway.sqlite</code>, <code>carte_midway.html</code> (replay), <code>audit_coherence.py</code>, <code>inferer_positions.py</code>, <code>simulateur_f1.py</code>, <code>rapport_f1.md</code> et le pipeline <code>tout_regenerer.sh</code>. Toutes les valeurs chiffrées restent des valeurs de travail tant que leur claim n'est pas <code>verified</code> (protocole §4.2).
+</footer>
