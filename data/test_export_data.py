@@ -37,6 +37,10 @@ def main():
     assert meta['db_hash'] == replay['build']['db_hash'], "db_hash incoherent entre meta et replay"
 
     assert os.path.exists(os.path.join(out, 'methodologie.html')), "methodologie.html absent"
+    meth = open(os.path.join(out, 'methodologie.html'), encoding='utf-8').read()
+    assert meth.strip(), "methodologie.html vide"
+    assert 'Principes directeurs' in meth, "methodologie.html: contenu attendu absent"
+    assert '<nav>' not in meth and '<script' not in meth, "methodologie.html: nav/script non strippes"
     print("OK")
 
 if __name__ == '__main__':

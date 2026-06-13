@@ -181,13 +181,17 @@ write('replay.json', data)
 write('chronologie.json', events)          # `events` vient de generer_carte.py:152-154
 write('meta.json', build)                  # `build` vient de generer_carte.py:162-169
 
+con.close()
+
 # Méthodologie : extraire le contenu du <body> (sans <nav>/<script>) en asset HTML
 src = open(os.path.join(ROOT, 'methodologie_midway.html'), encoding='utf-8').read()
-body = re.search(r'<body[^>]*>(.*)</body>', src, re.S).group(1)
+m = re.search(r'<body[^>]*>(.*)</body>', src, re.S)
+if not m:
+    raise SystemExit("export_data: impossible d'extraire le <body> de methodologie_midway.html")
+body = m.group(1)
 body = re.sub(r'<nav>.*?</nav>', '', body, flags=re.S)
 body = re.sub(r'<script.*?</script>', '', body, flags=re.S)
 with open(os.path.join(OUT, 'methodologie.html'), 'w', encoding='utf-8') as f:
     f.write(body.strip())
 
-con.close()
 print(f"OK: {OUT} (entites={len(entities)}, events={len(events)})")
