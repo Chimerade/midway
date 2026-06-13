@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8">
+<title>Midway 1942 — Replay</title>
+<style>
+ :root{--bg:#fff;--panel:#f4f6f9;--bord:#d4dce5;--txt:#1c2733;--txt2:#5a6b80;--accent:#b07900;}
+ body.dark{--bg:#0b1220;--panel:#101a2e;--bord:#223348;--txt:#cfd8e3;--txt2:#8fa3bd;--accent:#ffd479;}
+ body{margin:0;font-family:Verdana,sans-serif;background:var(--bg);color:var(--txt);display:flex;flex-direction:column;height:100vh;overflow:hidden}
+ #bar{padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--bord);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+ #bar b{font-size:13px}
+ #clock{font-size:17px;color:var(--accent);font-family:Consolas,monospace;min-width:225px}
+ input[type=range]{accent-color:#1f6fce}
+ #slider{flex:1;min-width:160px}
+ button{background:var(--bg);color:var(--txt);border:1px solid var(--bord);border-radius:4px;padding:4px 11px;cursor:pointer;font-size:13px}
+ button:hover{border-color:#1f6fce}
+ label{font-size:11px;user-select:none;cursor:pointer}
+ #main{display:flex;flex:1;min-height:0}
+ #map{flex:1;position:relative}
+ canvas{position:absolute;inset:0;width:100%;height:100%}
+ #feed{width:330px;background:var(--panel);border-left:1px solid var(--bord);overflow-y:auto;padding:10px;font-size:11px;line-height:1.45}
+ .ev{padding:5px 7px;margin-bottom:5px;border-left:3px solid var(--bord);background:var(--bg);border-radius:0 4px 4px 0;opacity:.5;cursor:pointer}
+ .ev:hover{opacity:.85;outline:1px solid #1f6fce}
+ .ev.cur{opacity:1;background:var(--panel);border:1px solid var(--bord);border-left-width:3px}
+ .ev.past{opacity:.35}
+ .ev .t{color:var(--accent);font-family:Consolas,monospace}
+ .ev.IJN{border-left-color:#d23b3b}.ev.USN{border-left-color:#1f6fce}
+ #legend{position:absolute;bottom:10px;left:10px;background:var(--panel);opacity:.95;padding:8px 12px;border-radius:6px;font-size:10px;line-height:1.7;border:1px solid var(--bord)}
+ #wpinfo{display:none;position:absolute;top:10px;left:10px;max-width:440px;background:var(--panel);border:1px solid var(--bord);border-radius:6px;padding:9px 12px;font-size:11px;line-height:1.5;z-index:5}
+ #build{margin-left:auto;font-size:10px;color:var(--txt2);font-family:Consolas,monospace}
+ .sw{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+</style></head><body>
+<div id="bar">
+ <b>MIDWAY 1942 — REPLAY</b>
+ <div id="clock"></div>
+ <button id="play">▶ Lecture</button>
+ <span style="font-size:11px">vitesse</span>
+ <input type="range" id="speed" min="1" max="3.56" value="2.778" step="0.01" style="width:120px" title="vitesse de lecture (continue, de ×10 à ×3600)">
+ <span id="speedlbl" style="font-size:11px;font-family:Consolas,monospace;min-width:50px"></span>
+ <input type="range" id="slider" min="0" max="1" value="0" step="1">
+ <span style="font-size:11px">zoom</span>
+ <button id="zoomout">−</button>
+ <input type="range" id="zoom" min="0.4" max="10" value="1" step="0.1" style="width:110px">
+ <button id="zoomin">+</button>
+ <button id="themebtn">🌙 sombre</button>
+ <label><input type="checkbox" id="cbHalo" checked> halos</label>
+ <label><input type="checkbox" id="cbTrail" checked> traînées</label>
+ <label><input type="checkbox" id="cbRaid" checked> raids</label>
+ <label><input type="checkbox" id="cbPercu"> monde perçu</label>
+ <span id="build"></span>
+</div>
+<div id="main">
+ <div id="map"><canvas id="cv"></canvas>
+  <div id="wpinfo"></div>
+  <button id="legbtn" style="display:none;position:absolute;bottom:10px;left:10px;z-index:6">ℹ légende</button>
+  <div id="legend">
+   <span id="legclose" style="float:right;cursor:pointer;font-weight:bold;padding:0 4px" title="fermer">✕</span>
+   <span class="sw" style="background:#1f6fce"></span>US Navy &nbsp;
+   <span class="sw" style="background:#d23b3b"></span>Marine impériale<br>
+   <b>Task Force (TF)</b> = groupe opérationnel US autour de porte-avions;<br>
+   <b>Kidō Butai</b> = force de frappe des PA japonais (composition sous le nom)<br>
+   ▲ navire/groupe en route (pointe = direction) · 🔥 en feu/stoppé · ✕ coulé<br>
+   ◉ pulsation orange = combat en cours · 👁 pulsation jaune = unité repérée par l'ennemi<br>
+   ✛ raid en vol (effectif affiché au zoom; <b>1 point = 1 avion</b> au zoom ≥ ×2,2)<br>
+   pertes appliquées au point d'attaque (approx.: inclut les amerrissages au retour)<br>
+   ◆ waypoint — <b>cliquer</b> : justification du cap<br>
+   ◌ halo = erreur de position (nm); il <b>grossit</b> quand la piste est périmée (+5 nm/h)<br>
+   Zoom: molette ou curseur · Anneaux 100/200/300 nm · pointillé = antiméridien
+  </div>
+ </div>
+ <div id="feed"></div>
+</div>
+<script>
+const D = {"entities": [{"id": "KIDO-BUTAI", "label": "Kidō Butai", "side": "IJN", "sub": "PA: Akagi · Hiryū · Kaga · Sōryū — escorte: 2BB 2CA 1CL 12DD — Nagumo", "track": [{"t": 1710, "lat": 31.0, "lon": -179.6, "err": 25.0, "m": "estimated", "crs": 135.0, "ts": "06-04T04:30", "cause": "[launch_start] Kidō Butai lance la frappe sur Midway: 108 appareils (Tomonaga)", "note": "Point de lancement recalé (~200 nm NO de Midway) — cohérent épaves + durées de vol"}, {"t": 1860, "lat": 30.7, "lon": -179.3, "err": 25.0, "m": "estimated", "crs": 135.0, "ts": "06-04T07:00", "cause": "[launch_start] Kidō Butai lance la frappe sur Midway: 108 appareils (Tomonaga)", "note": "Descente SE vers Midway; vitesse moyenne réduite par les manœuvres AA"}, {"t": 1997, "lat": 30.5, "lon": -179.1, "err": 25.0, "m": "estimated", "crs": 70.0, "ts": "06-04T09:17", "cause": "[course_change] La KB vire au 070 (ENE) vers les porte-avions US — la frappe du Hornet (cap 265→240?) la manque en partie", "note": "Virage au 070 vers les PA US"}, {"t": 2062, "lat": 30.55, "lon": -179.15, "err": 20.0, "m": "estimated", "crs": null, "ts": "06-04T10:22", "cause": "[attack] VT-8 (Waldron, 15 TBD seuls, sans escorte) attaque: tous abattus (~09:36), 1 survivant (Ens. Gay); aucun coup", "note": "Position au moment des impacts (manœuvres évasives VT depuis 09:20)"}, {"t": 2520, "lat": 31.1, "lon": -179.7, "err": 30.0, "m": "estimated", "crs": 310.0, "ts": "06-04T18:00", "cause": "[course_change] Retraite générale de la force de Nagumo vers le NO au crépuscule (regroupement prévu avec le corps principal)", "note": "Reliquat (Nagara + escorte), retraite NO avec les CV en flammes"}, {"t": 3180, "lat": 31.8, "lon": -180.8, "err": 35.0, "m": "estimated", "crs": 300.0, "ts": "06-05T05:00", "cause": "[decision] Yamamoto annule l'opération MI; retraite générale", "note": "Zone de sabordage Akagi/Hiryū — grossier"}]}, {"id": "TF-16", "label": "Task Force 16", "side": "USN", "sub": "PA: Enterprise · Hornet — escorte: 2AO 5CA 1CL 9DD — Spruance", "track": [{"t": -510, "lat": 32.07, "lon": -172.75, "err": 25.0, "m": "estimated", "crs": 283.0, "ts": "06-02T15:30", "cause": "[other] Jonction TF-16/TF-17 à Point Luck (~32°N 173°W, 045°/325 nm de Midway); Fletcher (Yorktown) prend le commandement tactique; TF-16 prend station à 10 nm au sud", "note": "Point Luck (32N 173W, 045/325 de Midway): jonction TF-16/17"}, {"t": -360, "lat": 32.22, "lon": -173.53, "err": 25.0, "m": "estimated", "crs": 281.0, "ts": "06-02T18:00", "cause": "[other] Jonction TF-16/TF-17 à Point Luck (~32°N 173°W, 045°/325 nm de Midway); Fletcher (Yorktown) prend le commandement tactique; TF-16 prend station à 10 nm au sud", "note": "Approche ouest (journal Hornet)"}, {"t": 360, "lat": 32.6, "lon": -175.88, "err": 25.0, "m": "estimated", "crs": 352.0, "ts": "06-03T06:00", "cause": "[other] Jonction TF-16/TF-17 à Point Luck (~32°N 173°W, 045°/325 nm de Midway); Fletcher (Yorktown) prend le commandement tactique; TF-16 prend station à 10 nm au sud", "note": "Route O-NO (journal Hornet)"}, {"t": 600, "lat": 33.12, "lon": -175.97, "err": 25.0, "m": "estimated", "crs": 48.0, "ts": "06-03T10:00", "cause": "[other] Jonction TF-16/TF-17 à Point Luck (~32°N 173°W, 045°/325 nm de Midway); Fletcher (Yorktown) prend le commandement tactique; TF-16 prend station à 10 nm au sud", "note": "Station d'attente zone Point Luck (journal Hornet)"}, {"t": 1080, "lat": 33.27, "lon": -175.77, "err": 25.0, "m": "estimated", "crs": 206.0, "ts": "06-03T18:00", "cause": "[course_change] Fletcher vire au 210° à 13,5 nœuds pour positionner les TF face aux vents du sud, en vue du lancement de l'aube du 4", "note": "Position nocturne, avant virage au 210 pour le lancement de l'aube (journal Enterprise)"}, {"t": 1800, "lat": 31.55, "lon": -176.75, "err": 20.0, "m": "estimated", "crs": 240.0, "ts": "06-04T06:00", "cause": "[decision] Fletcher à Spruance : \"proceed southwesterly and attack enemy carriers when definitely located\" — TF-16 part en avant, TF-17 récupère sa recherche", "note": "\"Point Luck\" puis route SO d'interception"}, {"t": 1866, "lat": 31.45, "lon": -176.95, "err": 20.0, "m": "estimated", "crs": 240.0, "ts": "06-04T07:06", "cause": "[decision] Fletcher à Spruance : \"proceed southwesterly and attack enemy carriers when definitely located\" — TF-16 part en avant, TF-17 récupère sa recherche", "note": "Point de lancement (~155 nm de la position estimée de la KB)"}, {"t": 2070, "lat": 31.05, "lon": -177.7, "err": 25.0, "m": "estimated", "crs": 240.0, "ts": "06-04T10:30", "cause": "[decision] Fletcher à Spruance : \"proceed southwesterly and attack enemy carriers when definitely located\" — TF-16 part en avant, TF-17 récupère sa recherche", "note": "Fermeture pendant la matinée"}, {"t": 2085, "lat": 31.01, "lon": -177.79, "err": 25.0, "m": "estimated", "crs": null, "ts": "06-04T10:45", "cause": "[recovery_start] TF-16 interrompt sa progression SO: récupérations successives des raids du matin (SBD, chasse, rescapés VT, puis avions du Yorktown) face au vent d'E-SE — dérive nette vers le NE jusqu'à ~15:00", "note": "POINT DE VIRAGE: fin de la fermeture SO; début des cycles de récupération (courses au vent E-SE répétées, route nette NE)"}, {"t": 2190, "lat": 31.15, "lon": -177.45, "err": 25.0, "m": "estimated", "crs": null, "ts": "06-04T12:30", "cause": "[recovery_start] TF-16 interrompt sa progression SO: récupérations successives des raids du matin (SBD, chasse, rescapés VT, puis avions du Yorktown) face au vent d'E-SE — dérive nette vers le NE jusqu'à ~15:00", "note": "En cycle de récupération: caps instantanés ~110 (au vent), ROUTE NETTE ~40-65 (NE)"}, {"t": 2370, "lat": 31.3, "lon": -177.3, "err": 25.0, "m": "estimated", "crs": 130.0, "ts": "06-04T15:30", "cause": "[launch_start] Enterprise lance 24 SBD (dont 10 ex-VB-3 du Yorktown) sur le Hiryū", "note": "Lancement de la frappe anti-Hiryū puis récupérations face au vent: dérive SE jusqu'au virage de 19:07. (Le bref rapprochement NO de ~14:55, EV-0604-1455-TF16NW, est sous la résolution des waypoints.)"}, {"t": 2587, "lat": 31.1, "lon": -177.0, "err": 25.0, "m": "estimated", "crs": 90.0, "ts": "06-04T19:07", "cause": "[decision] Spruance refuse la poursuite à l'ouest de nuit et fait route à l'est jusqu'à minuit — évite la tentative d'engagement nocturne de Yamamoto", "note": "Route est pour la nuit (décision Spruance)"}, {"t": 2881, "lat": 31.0, "lon": -176.3, "err": 30.0, "m": "estimated", "crs": 290.0, "ts": "06-05T00:01", "cause": "[course_change] Minuit: fin de la jambe est défensive; TF-16 vient au nord puis à l'ouest (plan annoncé de Spruance) pour être en position de frapper à l'aube", "note": "Point de virage nocturne: extrémité est de la jambe défensive, retour vers l'ouest"}, {"t": 3240, "lat": 31.4, "lon": -177.4, "err": 25.0, "m": "estimated", "crs": 270.0, "ts": "06-05T06:00", "cause": "[course_change] TF-16 reprend la poursuite vers l'ouest au matin (rapports de CV en flammes + contacts de la nuit)", "note": "Retour O après la nuit défensive à l'est"}, {"t": 3960, "lat": 30.8, "lon": -179.6, "err": 30.0, "m": "estimated", "crs": 280.0, "ts": "06-05T18:00", "cause": "[course_change] TF-16 reprend la poursuite vers l'ouest au matin (rapports de CV en flammes + contacts de la nuit)", "note": "Poursuite; frappe Tanikaze au crépuscule"}, {"t": 4860, "lat": 29.5, "lon": -183.5, "err": 35.0, "m": "estimated", "crs": 250.0, "ts": "06-06T09:00", "cause": "[sighting] Reconnaissance matinale de l'Enterprise relocalise Mogami/Mikuma et leurs 2 DD; TF-16 met le cap dessus", "note": "À portée de CruDiv 7 (~95 nm)"}, {"t": 5220, "lat": 29.4, "lon": -184.5, "err": 35.0, "m": "estimated", "crs": 260.0, "ts": "06-06T15:00", "cause": "[sighting] Reconnaissance matinale de l'Enterprise relocalise Mogami/Mikuma et leurs 2 DD; TF-16 met le cap dessus", "note": "3e frappe lancée"}, {"t": 5467, "lat": 29.35, "lon": -184.8, "err": 35.0, "m": "estimated", "crs": 80.0, "ts": "06-06T19:07", "cause": "[course_change] Spruance rompt la poursuite (carburant des destroyers, proximité de Wake) et fait route NE vers le ravitaillement", "note": "POINT DE VIRAGE: extrémité ouest de la poursuite; route NE vers le ravitaillement"}, {"t": 6240, "lat": 29.8, "lon": -182.5, "err": 40.0, "m": "estimated", "crs": 80.0, "ts": "06-07T08:00", "cause": "[course_change] Spruance rompt la poursuite (carburant des destroyers, proximité de Wake) et fait route NE vers le ravitaillement", "note": "Fin de poursuite (limite carburant des DD); route de retour NE"}]}, {"id": "TF-17", "label": "Task Force 17", "side": "USN", "sub": "PA: Yorktown — escorte: 2CA 5DD — Fletcher", "track": [{"t": -510, "lat": 32.24, "lon": -172.75, "err": 25.0, "m": "estimated", "crs": 283.0, "ts": "06-02T15:30", "cause": "[other] Jonction TF-16/TF-17 à Point Luck (~32°N 173°W, 045°/325 nm de Midway); Fletcher (Yorktown) prend le commandement tactique; TF-16 prend station à 10 nm au sud", "note": "Point Luck: le Yorktown aperçoit la TF-16 à 10 nm au sud"}, {"t": -360, "lat": 32.39, "lon": -173.53, "err": 25.0, "m": "estimated", "crs": 281.0, "ts": "06-02T18:00", "cause": "[other] Jonction TF-16/TF-17 à Point Luck (~32°N 173°W, 045°/325 nm de Midway); Fletcher (Yorktown) prend le commandement tactique; TF-16 prend station à 10 nm au sud", "note": "~10 nm N de la TF-16"}, {"t": 360, "lat": 32.77, "lon": -175.88, "err": 25.0, "m": "estimated", "crs": 352.0, "ts": "06-03T06:00", "cause": "[other] Jonction TF-16/TF-17 à Point Luck (~32°N 173°W, 045°/325 nm de Midway); Fletcher (Yorktown) prend le commandement tactique; TF-16 prend station à 10 nm au sud", "note": "~10 nm N de la TF-16"}, {"t": 600, "lat": 33.28, "lon": -175.97, "err": 25.0, "m": "estimated", "crs": 46.0, "ts": "06-03T10:00", "cause": "[other] Jonction TF-16/TF-17 à Point Luck (~32°N 173°W, 045°/325 nm de Midway); Fletcher (Yorktown) prend le commandement tactique; TF-16 prend station à 10 nm au sud", "note": "~10 nm N de la TF-16"}, {"t": 1080, "lat": 33.44, "lon": -175.77, "err": 25.0, "m": "estimated", "crs": 202.0, "ts": "06-03T18:00", "cause": "[course_change] Fletcher vire au 210° à 13,5 nœuds pour positionner les TF face aux vents du sud, en vue du lancement de l'aube du 4", "note": "Position nocturne (~10 nm N TF-16), avant le lancement de l'aube"}, {"t": 1958, "lat": 31.7, "lon": -176.6, "err": 20.0, "m": "estimated", "crs": 225.0, "ts": "06-04T08:38", "cause": "[launch_start] Yorktown lance: 17 VB-3, 12 VT-3, 6 VF-3 (Fletcher garde VS-5 en réserve) — fin ~09:06", "note": "Lancement du groupe Yorktown"}, {"t": 2400, "lat": 31.55, "lon": -176.8, "err": 25.0, "m": "estimated", "crs": 90.0, "ts": "06-04T16:00", "cause": "[other] Buckmaster ordonne l'évacuation du Yorktown (crainte de chavirage)", "note": "Après abandon du Yorktown; Fletcher sur l'Astoria"}, {"t": 3600, "lat": 31.0, "lon": -176.1, "err": 15.0, "m": "estimated", "crs": 100.0, "ts": "06-05T12:00", "cause": "[decision] Décision de sauver le Yorktown: équipe de sauvetage à bord, remorquage par le Vireo, escorte constituée", "note": "Retrait E; éléments détachés vers le sauvetage"}, {"t": 4080, "lat": 30.95, "lon": -175.85, "err": 15.0, "m": "estimated", "crs": 255.0, "ts": "06-05T20:00", "cause": "[decision] Décision de sauver le Yorktown: équipe de sauvetage à bord, remorquage par le Vireo, escorte constituée", "note": "POINT DE VIRAGE: extrémité est du retrait; retour O vers le groupe de sauvetage du Yorktown"}, {"t": 5100, "lat": 30.85, "lon": -176.6, "err": 10.0, "m": "estimated", "crs": 0.0, "ts": "06-06T13:00", "cause": "[decision] Décision de sauver le Yorktown: équipe de sauvetage à bord, remorquage par le Vireo, escorte constituée", "note": "Écran autour du groupe de sauvetage Yorktown [err resserrée: écran autour du point de sauvetage connu]"}]}, {"id": "CRUDIV7", "label": "CruDiv 7", "side": "IJN", "sub": "4CA 2DD — Kurita", "track": [{"t": 3023, "lat": 28.2, "lon": -179.9, "err": 50.0, "m": "estimated", "crs": 280.0, "ts": "06-05T02:23", "cause": "[sighting] Le Tambor est aperçu par CruDiv 7; ordre de virage d'urgence simultané", "note": "Zone de collision Mogami/Mikuma (retraite O après annulation du bombardement) — TRÈS grossier"}, {"t": 3365, "lat": 28.4, "lon": -181.0, "err": 40.0, "m": "estimated", "crs": 280.0, "ts": "06-05T08:05", "cause": "[decision] Yamamoto annule l'opération MI; retraite générale", "note": "Attaque VMSB-241 (crash de Fleming sur le Mikuma)"}, {"t": 4910, "lat": 29.2, "lon": -185.2, "err": 40.0, "m": "estimated", "crs": 290.0, "ts": "06-06T09:50", "cause": "[decision] Yamamoto annule l'opération MI; retraite générale", "note": "Sous les frappes successives de TF-16"}, {"t": 5490, "lat": 29.47, "lon": -186.82, "err": 30.0, "m": "estimated", "crs": 290.0, "ts": "06-06T19:30", "cause": "[sinking] Le Mikuma coule (première perte de croiseur lourd IJN)", "note": "Le Mikuma coule; Mogami + 2 DD continuent vers Wake/Truk"}]}, {"id": "TRANSPORT-GROUP", "label": "Convoi d'invasion", "side": "IJN", "sub": "1AO — Tanaka", "track": [{"t": 540, "lat": 26.1, "lon": -185.3, "err": 40.0, "m": "estimated", "crs": 80.0, "ts": "06-03T09:00", "cause": "[other] Plan MI: route d'approche du groupe de transport vers Midway (débarquement prévu le 6); cap ENE ~10 nds", "note": "Contact Reid ~450 nm OSO — distance arbitrée par la géométrie (convoi 10-11 nds jusqu'au point d'attaque B-17 de 16:24)"}, {"t": 984, "lat": 26.8, "lon": -184.0, "err": 40.0, "m": "estimated", "crs": 80.0, "ts": "06-03T16:24", "cause": "[other] Plan MI: route d'approche du groupe de transport vers Midway (débarquement prévu le 6); cap ENE ~10 nds", "note": "Attaque B-17 (aucun coup)"}, {"t": 1543, "lat": 27.2, "lon": -182.8, "err": 40.0, "m": "estimated", "crs": 80.0, "ts": "06-04T01:43", "cause": "[other] Plan MI: route d'approche du groupe de transport vers Midway (débarquement prévu le 6); cap ENE ~10 nds", "note": "Attaque de nuit des PBY (Akebono Maru touché)"}]}, {"id": "SH-HIRYU", "label": "Hiryū", "side": "IJN", "sub": "PA isolé — seul CV opérationnel après 10h26", "track": [{"t": 2094, "lat": 30.7, "lon": -179.0, "err": 25.0, "m": "estimated", "crs": 30.0, "ts": "06-04T10:54", "cause": "[course_change] Le reliquat de la KB (Hiryū + escorte, Abe puis Yamaguchi) maintient le cap N-NE: continuer le combat et garder la portée de frappe", "note": "Le Hiryū file N-NE avec l'escorte après 10:26"}, {"t": 2310, "lat": 31.0, "lon": -178.8, "err": 25.0, "m": "estimated", "crs": 350.0, "ts": "06-04T14:30", "cause": "[course_change] Le reliquat de la KB (Hiryū + escorte, Abe puis Yamaguchi) maintient le cap N-NE: continuer le combat et garder la portée de frappe", "note": null}, {"t": 2461, "lat": 31.67, "lon": -179.17, "err": 15.0, "m": "observed", "crs": 310.0, "ts": "06-04T17:01", "cause": "[course_change] Le reliquat de la KB (Hiryū + escorte, Abe puis Yamaguchi) maintient le cap N-NE: continuer le combat et garder la portée de frappe", "note": "Fix du rapport Enterprise (entrée 1905 zone +10): 31°40'N 179°10'W. Cohérent avec l'épave (dérive 19 nm/16h)."}, {"t": 3432, "lat": 31.45, "lon": -179.38, "err": 10.0, "m": "estimated", "crs": null, "ts": "06-05T09:12", "cause": "[sinking] Le Hiryū coule", "note": "TROM ~31°27'N 179°23'W"}]}, {"id": "SH-CV5", "label": "Yorktown", "side": "USN", "sub": "PA détaché de TF-17 après les coups de 12h11", "track": [{"t": 2171, "lat": 31.65, "lon": -176.85, "err": 12.0, "m": "estimated", "crs": null, "ts": "06-04T12:11", "cause": "[attack] Attaque Kobayashi (7 D3A passent la CAP): 3 bombes touchent le Yorktown (12:11-12:16); chaudières stoppées; Kobayashi tué", "note": "Stoppé après les 3 bombes [err resserrée: TF-17 au complet sur zone]"}, {"t": 2323, "lat": 31.6, "lon": -176.9, "err": 12.0, "m": "estimated", "crs": null, "ts": "06-04T14:43", "cause": "[attack] Attaque Tomonaga: 2 torpilles touchent le Yorktown (~14:43); gîte 23°; Tomonaga abattu", "note": "2 torpilles; gîte 23°, abandon à 15:00 [err resserrée: TF-17 au complet sur zone]"}, {"t": 5136, "lat": 30.85, "lon": -176.6, "err": 8.0, "m": "estimated", "crs": 90.0, "ts": "06-06T13:36", "cause": "[decision] Décision de sauver le Yorktown: équipe de sauvetage à bord, remorquage par le Vireo, escorte constituée", "note": "Sous remorque du Vireo au moment de l'attaque d'I-168 [err resserrée: à couple du Hammann, fixes multiples du groupe]"}, {"t": 6181, "lat": 30.77, "lon": -176.4, "err": 8.0, "m": "estimated", "crs": null, "ts": "06-07T07:01", "cause": "[sinking] Le Yorktown chavire et coule à l'aube", "note": "30°46'N + longitude corrigée 176°24'W (transposition probable du rapport: \"167-24\"). Épave relocalisée 1998/2023."}]}, {"id": "SH-KAGA", "label": "Kaga", "side": "IJN", "sub": "stoppé en flammes après 10h26", "track": [{"t": 2066, "lat": 30.55, "lon": -179.15, "err": 20.0, "m": "estimated", "crs": null, "ts": "06-04T10:26", "cause": "[hit] VS-6 + VB-6 (McClusky) plongent: Kaga touché 4-5 bombes (10:22-10:26) — hangars pleins de munitions: incendies incontrôlables", "note": "Stoppé en flammes au point d'impact; dérive ensuite (~1.5 nds) vers la position de naufrage"}, {"t": 2605, "lat": 30.38, "lon": -179.28, "err": 10.0, "m": "estimated", "crs": null, "ts": "06-04T19:25", "cause": "[sinking] Le Kaga coule (torpilles du Hagikaze) (~811 morts — la plus lourde perte humaine des 4 CV)", "note": "Position TROM (30°23'N 179°17'W); épave localisée 2019 (Petrel)"}]}, {"id": "SH-SORYU", "label": "Sōryū", "side": "IJN", "sub": "stoppé en flammes après 10h28", "track": [{"t": 2068, "lat": 30.57, "lon": -179.13, "err": 20.0, "m": "estimated", "crs": null, "ts": "06-04T10:28", "cause": "[hit] VB-3 (Leslie): 3 coups sur le Sōryū — en flammes, stoppé à 10:40", "note": "Stoppé 10:40; abandon 10:45; dérive courte"}, {"t": 2593, "lat": 30.63, "lon": -179.22, "err": 10.0, "m": "estimated", "crs": null, "ts": "06-04T19:13", "cause": "[sinking] Le Sōryū coule (torpilles de l'Isokaze); Yanagimoto reste à bord (~711 morts)", "note": "TROM 30°38'N 179°13'W"}]}, {"id": "SH-AKAGI", "label": "Akagi", "side": "IJN", "sub": "en flammes, abandonné, dérive", "track": [{"t": 2066, "lat": 30.53, "lon": -179.12, "err": 20.0, "m": "estimated", "crs": null, "ts": "06-04T10:26", "cause": "[hit] Section Best (3 SBD VB-6): 1 coup fatal sur l'Akagi (ascenseur central, hangar) + 1 near-miss arrière qui bloque le gouvernail? — incendies", "note": "Gouvernail bloqué 10:42 (cercles), puis dérive E ~1.3 nds sur 19 h jusqu'au point de sabordage"}, {"t": 2580, "lat": 30.52, "lon": -178.95, "err": 20.0, "m": "estimated", "crs": null, "ts": "06-04T19:00", "cause": "[hit] Section Best (3 SBD VB-6): 1 coup fatal sur l'Akagi (ascenseur central, hangar) + 1 near-miss arrière qui bloque le gouvernail? — incendies", "note": "Équipage évacué progressivement; remorquage envisagé puis abandonné"}, {"t": 3200, "lat": 30.5, "lon": -178.67, "err": 10.0, "m": "estimated", "crs": null, "ts": "06-05T05:20", "cause": "[scuttling] L'Akagi est sabordé (torpilles de 4 destroyers), coule ~05:20", "note": "TROM ~30°30'N 178°40'W; épave 2019"}]}], "wrecks": [{"t": 2605, "lat": 30.38, "lon": -179.28, "name": "Kaga", "h": "04 juin 19:25", "ent": "SH-KAGA"}, {"t": 2593, "lat": 30.63, "lon": -179.22, "name": "Sōryū", "h": "04 juin 19:13", "ent": "SH-SORYU"}, {"t": 3200, "lat": 30.5, "lon": -178.67, "name": "Akagi", "h": "05 juin 05:20", "ent": "SH-AKAGI"}, {"t": 3432, "lat": 31.45, "lon": -179.38, "name": "Hiryū", "h": "05 juin 09:12", "ent": "SH-HIRYU"}, {"t": 6181, "lat": 30.77, "lon": -176.4, "name": "Yorktown", "h": "07 juin 07:01", "ent": "SH-CV5"}, {"t": 5140, "lat": 30.77, "lon": -176.4, "name": "Hammann", "h": "06 juin 13:40", "ent": "SH-HAMMANN"}, {"t": 5490, "lat": 29.47, "lon": 173.18, "name": "Mikuma", "h": "06 juin 19:30", "ent": "SH-MIKUMA"}], "fires": [{"ent": "SH-KAGA", "t0": 2066, "t1": 2605}, {"ent": "SH-SORYU", "t0": 2068, "t1": 2593}, {"ent": "SH-AKAGI", "t0": 2066, "t1": 3200}, {"ent": "SH-HIRYU", "t0": 2465, "t1": 3432}, {"ent": "SH-CV5", "t0": 2176, "t1": 2260}, {"ent": "SH-CV5", "t0": 2325, "t1": 6181}, {"ent": "SH-MIKUMA", "t0": 5040, "t1": 5490}], "combats": [{"t0": 982, "t1": 999, "ent": "TRANSPORT-GROUP", "s": "B-17 attaquent les transports à haute altitude — aucun coup "}, {"t0": 1541, "t1": 1557, "ent": "TRANSPORT-GROUP", "s": "Attaque de nuit de 4 PBY à la torpille; Akebono Maru touché "}, {"t0": 1541, "t1": 1557, "ent": "SH-AKEBONO-MARU", "s": "Attaque de nuit de 4 PBY à la torpille; Akebono Maru touché "}, {"t0": 1828, "t1": 1844, "ent": "SH-MIDWAY", "s": "La frappe Tomonaga bombarde Midway (06:30-06:43): dégâts imp"}, {"t0": 1868, "t1": 1884, "ent": "KIDO-BUTAI", "s": "6 TBF (Fieberling) + 4 B-26 (Collins) attaquent la KB sans e"}, {"t0": 1913, "t1": 1929, "ent": "KIDO-BUTAI", "s": "16 SBD-2 VMSB-241 (Henderson) attaquent le Hiryū en glide-bo"}, {"t0": 1913, "t1": 1929, "ent": "SH-HIRYU", "s": "16 SBD-2 VMSB-241 (Henderson) attaquent le Hiryū en glide-bo"}, {"t0": 1928, "t1": 1944, "ent": "KIDO-BUTAI", "s": "B-17 (Sweeney) bombardent les CV depuis ~6000 m: aucun coup"}, {"t0": 1938, "t1": 1954, "ent": "KIDO-BUTAI", "s": "11 SB2U (Norris) attaquent le Haruna: aucun coup"}, {"t0": 1938, "t1": 1954, "ent": "SH-HARUNA", "s": "11 SB2U (Norris) attaquent le Haruna: aucun coup"}, {"t0": 1998, "t1": 2014, "ent": "KIDO-BUTAI", "s": "VT-8 (Waldron, 15 TBD seuls, sans escorte) attaque: tous aba"}, {"t0": 2016, "t1": 2032, "ent": "KIDO-BUTAI", "s": "VT-6 (Lindsey, 14 TBD) attaque par les deux bords: 10 perdus"}, {"t0": 2053, "t1": 2069, "ent": "KIDO-BUTAI", "s": "VT-3 (Massey, 12 TBD) + VF-3 (Thach, 6 F4F) attaquent: 10 TB"}, {"t0": 2060, "t1": 2076, "ent": "SH-KAGA", "s": "VS-6 + VB-6 (McClusky) plongent: Kaga touché 4-5 bombes (10:"}, {"t0": 2063, "t1": 2079, "ent": "SH-SORYU", "s": "VB-3 (Leslie): 3 coups sur le Sōryū — en flammes, stoppé à 1"}, {"t0": 2064, "t1": 2080, "ent": "SH-AKAGI", "s": "Section Best (3 SBD VB-6): 1 coup fatal sur l'Akagi (ascense"}, {"t0": 2163, "t1": 2179, "ent": "SH-CV5", "s": "Attaque Kobayashi (7 D3A passent la CAP): 3 bombes touchent "}, {"t0": 2308, "t1": 2324, "ent": "SH-CV5", "s": "Attaque Tomonaga: 2 torpilles touchent le Yorktown (~14:43);"}, {"t0": 2459, "t1": 2475, "ent": "SH-HIRYU", "s": "4 bombes sur le Hiryū (avant, ascenseur projeté contre l'îlo"}, {"t0": 3021, "t1": 3037, "ent": "SH-MIKUMA", "s": "Le Mogami éperonne le Mikuma: proue détruite, vitesse réduit"}, {"t0": 3363, "t1": 3379, "ent": "CRUDIV7", "s": "VMSB-241 attaque Mogami/Mikuma; le SBD de Fleming s'écrase s"}, {"t0": 3363, "t1": 3379, "ent": "SH-MIKUMA", "s": "VMSB-241 attaque Mogami/Mikuma; le SBD de Fleming s'écrase s"}, {"t0": 4908, "t1": 4925, "ent": "CRUDIV7", "s": "1re frappe: coups sur Mogami et Mikuma"}, {"t0": 5038, "t1": 5055, "ent": "CRUDIV7", "s": "2e frappe: Mikuma dévasté; Mogami et un DD touchés"}, {"t0": 5038, "t1": 5055, "ent": "SH-MIKUMA", "s": "2e frappe: Mikuma dévasté; Mogami et un DD touchés"}, {"t0": 5134, "t1": 5150, "ent": "SH-CV5", "s": "I-168 (Tanabe) torpille à travers l'écran: 2 torpilles dans "}, {"t0": 5134, "t1": 5150, "ent": "SH-HAMMANN", "s": "I-168 (Tanabe) torpille à travers l'écran: 2 torpilles dans "}, {"t0": 5203, "t1": 5220, "ent": "CRUDIV7", "s": "3e frappe: le Mikuma est achevé (coule dans la soirée); le M"}, {"t0": 5203, "t1": 5220, "ent": "SH-MIKUMA", "s": "3e frappe: le Mikuma est achevé (coule dans la soirée); le M"}], "spots": [{"t": 540, "ent": "TRANSPORT-GROUP", "s": "PBY de VP-44 (Ens. Reid) repère le groupe de transport "}, {"t": 1774, "ent": "KIDO-BUTAI", "s": "PBY 4V58 (Ady, VP-23) : \"enemy carriers\" — premier cont"}, {"t": 1803, "ent": "KIDO-BUTAI", "s": "PBY 4V58 (Ady) : \"two carriers and battleships bearing "}, {"t": 1888, "ent": "TF-16", "s": "Hydravion n°4 du Tone signale 10 navires ennemis"}, {"t": 1940, "ent": "TF-16", "s": "Tone n°4 : \"l'ennemi est accompagné de ce qui semble êt"}, {"t": 2042, "ent": "KIDO-BUTAI", "s": "McClusky (CEAG, groupe Enterprise) repère la KB à ~35 n"}, {"t": 2325, "ent": "SH-HIRYU", "s": "SBD de VS-5 (Adams, recherche lancée 13:30) localise le"}, {"t": 4770, "ent": "CRUDIV7", "s": "2e contact du matin: \"2 CA, 2 DD, 28°55'N 175°10'E, cap"}], "raids": [{"mid": "MS-0603-B17", "seq": 1, "side": "USN", "t0": 765, "t1": 984, "a": [28.21, -177.37], "b": [26.8, -184.0], "n0": 9, "lost": 0, "ta": 984, "tl": 750, "par": 1}, {"mid": "MS-0603-B17", "seq": 2, "side": "USN", "t0": 1000, "t1": 1130, "a": [26.8, -184.0], "b": [28.21, -177.37], "n0": 9, "lost": 0, "ta": 984, "tl": null, "par": 1}, {"mid": "MS-0603-PBY-SEARCH", "seq": 1, "side": "USN", "t0": 255, "t1": 675, "a": [28.21, -177.37], "b": [24.8, -189.83], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0603-PBY-SEARCH", "seq": 2, "side": "USN", "t0": 675, "t1": 1095, "a": [24.8, -189.83], "b": [28.21, -177.37], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-B17AM", "seq": 1, "side": "USN", "t0": 1695, "t1": 1815, "a": [28.21, -177.37], "b": [27.0, -180.5], "n0": 15, "lost": 0, "ta": 1930, "tl": null, "par": 1}, {"mid": "MS-0604-B17AM", "seq": 2, "side": "USN", "t0": 1815, "t1": 1930, "a": [27.0, -180.5], "b": [30.6, -179.2], "n0": 15, "lost": 0, "ta": 1930, "tl": null, "par": 1}, {"mid": "MS-0604-B17AM", "seq": 3, "side": "USN", "t0": 1940, "t1": 2080, "a": [30.6, -179.2], "b": [28.21, -177.37], "n0": 15, "lost": 0, "ta": 1930, "tl": null, "par": 1}, {"mid": "MS-0604-B26", "seq": 1, "side": "USN", "t0": 1800, "t1": 1870, "a": [28.21, -177.37], "b": [30.62, -179.2], "n0": 4, "lost": 2, "ta": 1870, "tl": null, "par": 1}, {"mid": "MS-0604-B26", "seq": 2, "side": "USN", "t0": 1875, "t1": 1950, "a": [30.62, -179.2], "b": [28.21, -177.37], "n0": 4, "lost": 2, "ta": 1870, "tl": null, "par": 1}, {"mid": "MS-0604-CV5AM", "seq": 1, "side": "USN", "t0": 1986, "t1": 2055, "a": [31.7, -176.6], "b": [30.58, -179.05], "n0": 35, "lost": 11, "ta": 2065, "tl": 1958, "par": 1}, {"mid": "MS-0604-CV5AM", "seq": 2, "side": "USN", "t0": 2055, "t1": 2080, "a": [30.58, -179.05], "b": [30.56, -179.13], "n0": 35, "lost": 11, "ta": 2065, "tl": null, "par": 1}, {"mid": "MS-0604-CV5AM", "seq": 3, "side": "USN", "t0": 2080, "t1": 2160, "a": [30.58, -179.05], "b": [31.11, -177.55], "n0": 35, "lost": 11, "ta": 2065, "tl": null, "par": 1}, {"mid": "MS-0604-CV6AM", "seq": 1, "side": "USN", "t0": 1926, "t1": 2000, "a": [31.45, -176.95], "b": [30.4, -179.3], "n0": 31, "lost": 18, "ta": 2062, "tl": 1866, "par": 1}, {"mid": "MS-0604-CV6AM", "seq": 2, "side": "USN", "t0": 2000, "t1": 2035, "a": [30.4, -179.3], "b": [30.1, -179.8], "n0": 31, "lost": 18, "ta": 2062, "tl": null, "par": 1}, {"mid": "MS-0604-CV6AM", "seq": 3, "side": "USN", "t0": 2035, "t1": 2062, "a": [30.1, -179.8], "b": [30.55, -179.15], "n0": 31, "lost": 18, "ta": 2062, "tl": null, "par": 1}, {"mid": "MS-0604-CV6AM", "seq": 4, "side": "USN", "t0": 2062, "t1": 2072, "a": [30.55, -179.15], "b": [30.53, -179.12], "n0": 31, "lost": 18, "ta": 2062, "tl": null, "par": 1}, {"mid": "MS-0604-CV6AM", "seq": 5, "side": "USN", "t0": 2072, "t1": 2165, "a": [30.55, -179.15], "b": [31.12, -177.53], "n0": 31, "lost": 18, "ta": 2062, "tl": null, "par": 1}, {"mid": "MS-0604-E6PM", "seq": 1, "side": "USN", "t0": 2385, "t1": 2461, "a": [31.3, -177.3], "b": [31.67, -179.17], "n0": 24, "lost": 3, "ta": 2461, "tl": 2370, "par": 1}, {"mid": "MS-0604-E6PM", "seq": 2, "side": "USN", "t0": 2475, "t1": 2550, "a": [31.67, -179.17], "b": [31.13, -177.05], "n0": 24, "lost": 3, "ta": 2461, "tl": null, "par": 1}, {"mid": "MS-0604-HIRYU1", "seq": 1, "side": "IJN", "t0": 2098, "t1": 2165, "a": [30.7, -179.0], "b": [31.65, -176.85], "n0": 24, "lost": 16, "ta": 2165, "tl": 2094, "par": 1}, {"mid": "MS-0604-HIRYU1", "seq": 2, "side": "IJN", "t0": 2180, "t1": 2250, "a": [31.65, -176.85], "b": [30.92, -178.86], "n0": 24, "lost": 16, "ta": 2165, "tl": null, "par": 1}, {"mid": "MS-0604-HIRYU2", "seq": 1, "side": "IJN", "t0": 2255, "t1": 2310, "a": [31.0, -178.8], "b": [31.6, -176.9], "n0": 16, "lost": 7, "ta": 2310, "tl": 2251, "par": 1}, {"mid": "MS-0604-HIRYU2", "seq": 2, "side": "IJN", "t0": 2325, "t1": 2380, "a": [31.6, -176.9], "b": [31.31, -178.97], "n0": 16, "lost": 7, "ta": 2310, "tl": null, "par": 1}, {"mid": "MS-0604-PBY-SEARCH", "seq": 1, "side": "USN", "t0": 1695, "t1": 2010, "a": [28.21, -177.37], "b": [19.27, -185.56], "n0": 22, "lost": 0, "ta": null, "tl": null, "par": 8}, {"mid": "MS-0604-PBY-SEARCH", "seq": 2, "side": "USN", "t0": 1695, "t1": 2010, "a": [28.21, -177.37], "b": [23.28, -189.11], "n0": 22, "lost": 0, "ta": null, "tl": null, "par": 8}, {"mid": "MS-0604-PBY-SEARCH", "seq": 3, "side": "USN", "t0": 1695, "t1": 2010, "a": [28.21, -177.37], "b": [28.21, -190.61], "n0": 22, "lost": 0, "ta": null, "tl": null, "par": 8}, {"mid": "MS-0604-PBY-SEARCH", "seq": 4, "side": "USN", "t0": 1695, "t1": 2010, "a": [28.21, -177.37], "b": [33.14, -189.66], "n0": 22, "lost": 0, "ta": null, "tl": null, "par": 8}, {"mid": "MS-0604-PBY-SEARCH", "seq": 5, "side": "USN", "t0": 1695, "t1": 2010, "a": [28.21, -177.37], "b": [36.46, -187.13], "n0": 22, "lost": 0, "ta": null, "tl": null, "par": 8}, {"mid": "MS-0604-PBY-SEARCH", "seq": 6, "side": "USN", "t0": 1695, "t1": 2010, "a": [28.21, -177.37], "b": [38.31, -184.35], "n0": 22, "lost": 0, "ta": null, "tl": null, "par": 8}, {"mid": "MS-0604-PBY-SEARCH", "seq": 7, "side": "USN", "t0": 1695, "t1": 2010, "a": [28.21, -177.37], "b": [39.48, -181.01], "n0": 22, "lost": 0, "ta": null, "tl": null, "par": 8}, {"mid": "MS-0604-PBY-SEARCH", "seq": 8, "side": "USN", "t0": 1695, "t1": 2010, "a": [28.21, -177.37], "b": [39.7, -174.93], "n0": 22, "lost": 0, "ta": null, "tl": null, "par": 8}, {"mid": "MS-0604-PBY-SEARCH", "seq": 9, "side": "USN", "t0": 2010, "t1": 2550, "a": [19.27, -185.56], "b": [28.21, -177.37], "n0": 22, "lost": 0, "ta": null, "tl": null, "par": 8}, {"mid": "MS-0604-PBY-SEARCH", "seq": 10, "side": "USN", "t0": 2010, "t1": 2550, "a": [23.28, -189.11], "b": [28.21, -177.37], "n0": 22, "lost": 0, "ta": null, "tl": null, "par": 8}, {"mid": "MS-0604-PBY-SEARCH", "seq": 11, "side": "USN", "t0": 2010, "t1": 2550, "a": [28.21, -190.61], "b": [28.21, -177.37], "n0": 22, "lost": 0, "ta": null, "tl": null, "par": 8}, {"mid": "MS-0604-PBY-SEARCH", "seq": 12, "side": "USN", "t0": 2010, "t1": 2550, "a": [33.14, -189.66], "b": [28.21, -177.37], "n0": 22, "lost": 0, "ta": null, "tl": null, "par": 8}, {"mid": "MS-0604-PBY-SEARCH", "seq": 13, "side": "USN", "t0": 2010, "t1": 2550, "a": [36.46, -187.13], "b": [28.21, -177.37], "n0": 22, "lost": 0, "ta": null, "tl": null, "par": 8}, {"mid": "MS-0604-PBY-SEARCH", "seq": 14, "side": "USN", "t0": 2010, "t1": 2550, "a": [38.31, -184.35], "b": [28.21, -177.37], "n0": 22, "lost": 0, "ta": null, "tl": null, "par": 8}, {"mid": "MS-0604-PBY-SEARCH", "seq": 15, "side": "USN", "t0": 2010, "t1": 2550, "a": [39.48, -181.01], "b": [28.21, -177.37], "n0": 22, "lost": 0, "ta": null, "tl": null, "par": 8}, {"mid": "MS-0604-PBY-SEARCH", "seq": 16, "side": "USN", "t0": 2010, "t1": 2550, "a": [39.7, -174.93], "b": [28.21, -177.37], "n0": 22, "lost": 0, "ta": null, "tl": null, "par": 8}, {"mid": "MS-0604-PBYNIGHT", "seq": 1, "side": "USN", "t0": 1275, "t1": 1543, "a": [28.21, -177.37], "b": [27.2, -182.8], "n0": 4, "lost": 0, "ta": 1543, "tl": null, "par": 1}, {"mid": "MS-0604-PBYNIGHT", "seq": 2, "side": "USN", "t0": 1560, "t1": 1770, "a": [27.2, -182.8], "b": [28.21, -177.37], "n0": 4, "lost": 0, "ta": 1543, "tl": null, "par": 1}, {"mid": "MS-0604-SB2U", "seq": 1, "side": "USN", "t0": 1815, "t1": 1940, "a": [28.21, -177.37], "b": [30.55, -179.05], "n0": 11, "lost": 3, "ta": 1940, "tl": null, "par": 1}, {"mid": "MS-0604-SB2U", "seq": 2, "side": "USN", "t0": 1950, "t1": 2040, "a": [30.55, -179.05], "b": [28.21, -177.37], "n0": 11, "lost": 3, "ta": 1940, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-AKAGI", "seq": 1, "side": "IJN", "t0": 1710, "t1": 1838, "a": [31.0, -179.6], "b": [26.0, -179.7], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-AKAGI", "seq": 2, "side": "IJN", "t0": 1838, "t1": 1864, "a": [26.0, -179.7], "b": [25.98, -178.59], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-AKAGI", "seq": 3, "side": "IJN", "t0": 1864, "t1": 1999, "a": [25.98, -178.59], "b": [30.7, -179.3], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-CHIKUMA1", "seq": 1, "side": "IJN", "t0": 1710, "t1": 1860, "a": [31.0, -179.6], "b": [32.12, -173.88], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-CHIKUMA1", "seq": 2, "side": "IJN", "t0": 1860, "t1": 1890, "a": [32.12, -173.88], "b": [33.09, -174.15], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-CHIKUMA1", "seq": 3, "side": "IJN", "t0": 1890, "t1": 2047, "a": [33.09, -174.15], "b": [30.7, -179.3], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-CHIKUMA5", "seq": 1, "side": "IJN", "t0": 1710, "t1": 1860, "a": [31.0, -179.6], "b": [33.94, -174.81], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-CHIKUMA5", "seq": 2, "side": "IJN", "t0": 1860, "t1": 1890, "a": [33.94, -174.81], "b": [34.75, -175.52], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-CHIKUMA5", "seq": 3, "side": "IJN", "t0": 1890, "t1": 2047, "a": [34.75, -175.52], "b": [30.7, -179.3], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-HARUNA", "seq": 1, "side": "IJN", "t0": 1710, "t1": 1810, "a": [31.0, -179.6], "b": [29.03, -177.82], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-HARUNA", "seq": 2, "side": "IJN", "t0": 1810, "t1": 1830, "a": [29.03, -177.82], "b": [29.34, -177.37], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-HARUNA", "seq": 3, "side": "IJN", "t0": 1830, "t1": 1935, "a": [29.34, -177.37], "b": [30.7, -179.3], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-KAGA", "seq": 1, "side": "IJN", "t0": 1710, "t1": 1838, "a": [31.0, -179.6], "b": [26.36, -177.46], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-KAGA", "seq": 2, "side": "IJN", "t0": 1838, "t1": 1864, "a": [26.36, -177.46], "b": [26.73, -176.42], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-KAGA", "seq": 3, "side": "IJN", "t0": 1864, "t1": 1999, "a": [26.73, -176.42], "b": [30.7, -179.3], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-TONE1", "seq": 1, "side": "IJN", "t0": 1710, "t1": 1860, "a": [31.0, -179.6], "b": [28.28, -174.78], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-TONE1", "seq": 2, "side": "IJN", "t0": 1860, "t1": 1890, "a": [28.28, -174.78], "b": [29.12, -174.16], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-TONE1", "seq": 3, "side": "IJN", "t0": 1890, "t1": 2047, "a": [29.12, -174.16], "b": [30.7, -179.3], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-TONE4", "seq": 1, "side": "IJN", "t0": 1740, "t1": 1890, "a": [31.0, -179.6], "b": [30.13, -173.88], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-TONE4", "seq": 2, "side": "IJN", "t0": 1890, "t1": 1920, "a": [30.13, -173.88], "b": [31.11, -173.68], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-SEARCH-TONE4", "seq": 3, "side": "IJN", "t0": 1920, "t1": 2077, "a": [31.11, -173.68], "b": [30.7, -179.3], "n0": 1, "lost": 0, "ta": null, "tl": null, "par": 1}, {"mid": "MS-0604-TOMONAGA", "seq": 1, "side": "IJN", "t0": 1725, "t1": 1816, "a": [31.0, -179.6], "b": [28.21, -177.37], "n0": 108, "lost": 10, "ta": 1830, "tl": 1710, "par": 1}, {"mid": "MS-0604-TOMONAGA", "seq": 2, "side": "IJN", "t0": 1830, "t1": 1843, "a": [28.21, -177.37], "b": [28.21, -177.37], "n0": 108, "lost": 10, "ta": 1830, "tl": null, "par": 1}, {"mid": "MS-0604-TOMONAGA", "seq": 3, "side": "IJN", "t0": 1860, "t1": 1957, "a": [28.21, -177.37], "b": [30.65, -179.2], "n0": 108, "lost": 10, "ta": 1830, "tl": null, "par": 1}, {"mid": "MS-0604-VMSB-SBD", "seq": 1, "side": "USN", "t0": 1810, "t1": 1915, "a": [28.21, -177.37], "b": [30.68, -179.27], "n0": 16, "lost": 8, "ta": 1915, "tl": null, "par": 1}, {"mid": "MS-0604-VMSB-SBD", "seq": 2, "side": "USN", "t0": 1925, "t1": 2010, "a": [30.68, -179.27], "b": [28.21, -177.37], "n0": 16, "lost": 8, "ta": 1915, "tl": null, "par": 1}, {"mid": "MS-0604-VT6", "seq": 1, "side": "USN", "t0": 1920, "t1": 2018, "a": [31.4, -177.1], "b": [30.47, -179.05], "n0": 14, "lost": 10, "ta": 2018, "tl": 1866, "par": 1}, {"mid": "MS-0604-VT6", "seq": 2, "side": "USN", "t0": 2040, "t1": 2100, "a": [30.47, -179.05], "b": [31.03, -177.74], "n0": 14, "lost": 10, "ta": 2018, "tl": null, "par": 1}, {"mid": "MS-0604-VT8", "seq": 1, "side": "USN", "t0": 1945, "t1": 2000, "a": [31.1, -177.8], "b": [30.55, -179.1], "n0": 15, "lost": 15, "ta": 2000, "tl": 1866, "par": 1}, {"mid": "MS-0604-VT8DET", "seq": 1, "side": "USN", "t0": 1800, "t1": 1870, "a": [28.21, -177.37], "b": [30.62, -179.2], "n0": 6, "lost": 5, "ta": 1870, "tl": null, "par": 1}, {"mid": "MS-0604-VT8DET", "seq": 2, "side": "USN", "t0": 1875, "t1": 1950, "a": [30.62, -179.2], "b": [28.21, -177.37], "n0": 6, "lost": 5, "ta": 1870, "tl": null, "par": 1}, {"mid": "MS-0606-STRIKE1", "seq": 1, "side": "USN", "t0": 4800, "t1": 4910, "a": [29.55, -183.4], "b": [29.2, -185.2], "n0": 26, "lost": 0, "ta": 4910, "tl": null, "par": 1}, {"mid": "MS-0606-STRIKE1", "seq": 2, "side": "USN", "t0": 4920, "t1": 5010, "a": [29.2, -185.2], "b": [29.46, -183.92], "n0": 26, "lost": 0, "ta": 4910, "tl": null, "par": 1}, {"mid": "MS-0606-STRIKE2", "seq": 1, "side": "USN", "t0": 4965, "t1": 5040, "a": [29.5, -183.8], "b": [29.25, -185.5], "n0": 31, "lost": 1, "ta": 5040, "tl": null, "par": 1}, {"mid": "MS-0606-STRIKE2", "seq": 2, "side": "USN", "t0": 5050, "t1": 5130, "a": [29.25, -185.5], "b": [29.43, -184.25], "n0": 31, "lost": 1, "ta": 5040, "tl": null, "par": 1}, {"mid": "MS-0606-STRIKE3", "seq": 1, "side": "USN", "t0": 5130, "t1": 5205, "a": [29.42, -184.3], "b": [29.35, -186.2], "n0": 24, "lost": 0, "ta": 5205, "tl": null, "par": 1}, {"mid": "MS-0606-STRIKE3", "seq": 2, "side": "USN", "t0": 5215, "t1": 5295, "a": [29.35, -186.2], "b": [29.39, -184.59], "n0": 24, "lost": 0, "ta": 5205, "tl": null, "par": 1}], "events": [{"t": -510, "type": "other", "side": "USN", "s": "Jonction TF-16/TF-17 à Point Luck (~32°N 173°W, 045°/325 nm de Midway); Fletcher (Yorktown) prend le commandement tactique; TF-16 prend station à 10 nm au sud", "u": 30}, {"t": 1, "type": "other", "side": "IJN", "s": "Plan MI: route d'approche du groupe de transport vers Midway (débarquement prévu le 6); cap ENE ~10 nds", "u": 0}, {"t": 255, "type": "launch_start", "side": "USN", "s": "Recherche quotidienne du 3 juin: les PBY partent en éventail (dont la ligne OSO de Reid, VP-44)", "u": 15}, {"t": 540, "type": "sighting", "side": "USN", "s": "PBY de VP-44 (Ens. Reid) repère le groupe de transport à ~450 nm OSO de Midway (relèvement ~253°); rapporté à tort comme \"Main Body\"", "u": 15}, {"t": 750, "type": "launch_start", "side": "USN", "s": "Midway lance 9 B-17 (Sweeney) contre le groupe de transport", "u": 15}, {"t": 984, "type": "attack", "side": "USN", "s": "B-17 attaquent les transports à haute altitude — aucun coup au but", "u": 15}, {"t": 1190, "type": "course_change", "side": "USN", "s": "Fletcher vire au 210° à 13,5 nœuds pour positionner les TF face aux vents du sud, en vue du lancement de l'aube du 4", "u": 20}, {"t": 1275, "type": "launch_start", "side": "USN", "s": "4 PBY-5A équipés radar décollent de Midway pour l'attaque de nuit à la torpille contre le convoi d'invasion", "u": 15}, {"t": 1543, "type": "hit", "side": "USN", "s": "Attaque de nuit de 4 PBY à la torpille; Akebono Maru touché (seul succès aérien torpille US de la bataille)", "u": 10}, {"t": 1710, "type": "launch_start", "side": "IJN", "s": "Kidō Butai lance la frappe sur Midway: 108 appareils (Tomonaga)", "u": 5}, {"t": 1710, "type": "launch_start", "side": "IJN", "s": "Lancement du plan de recherche (7 appareils, une seule phase); catapulte du Tone en panne", "u": 10}, {"t": 1725, "type": "launch_end", "side": "IJN", "s": "Fin du lancement de la frappe Tomonaga (108 appareils des 4 CV)", "u": 5}, {"t": 1740, "type": "launch_end", "side": "IJN", "s": "Hydravion n°4 du Tone (Amari) lancé avec ~30 min de retard — il couvrira la ligne où se trouvent les TF US", "u": 10}, {"t": 1774, "type": "sighting", "side": "USN", "s": "PBY 4V58 (Ady, VP-23) : \"enemy carriers\" — premier contact sur la Kidō Butai", "u": 3}, {"t": 1785, "type": "report", "side": "USN", "s": "PBY (Lt. W. Chase) en clair : \"many planes heading Midway, bearing 320, distance 150\" — l'alerte du raid entrant qui précipite le décollage général de Midway", "u": 3}, {"t": 1793, "type": "sighting", "side": "USN", "s": "Radar de Midway détecte le raid entrant (\"many planes, 89 miles\"); décollage général de tout ce qui vole", "u": 5}, {"t": 1803, "type": "report", "side": "USN", "s": "PBY 4V58 (Ady) : \"two carriers and battleships bearing 320, distance 180, course 135, speed 25\" — amplification du contact de 0534; position erronée de ~30-40 nm; ne signale que 2 CV sur 4", "u": 3}, {"t": 1807, "type": "decision", "side": "USN", "s": "Fletcher à Spruance : \"proceed southwesterly and attack enemy carriers when definitely located\" — TF-16 part en avant, TF-17 récupère sa recherche", "u": 3}, {"t": 1815, "type": "course_change", "side": "USN", "s": "Les 15 B-17 de Sweeney, en route vers le convoi de transport, sont déroutés vers les porte-avions japonais signalés par les PBY", "u": 20}, {"t": 1816, "type": "attack", "side": "USN", "s": "VMF-221 (Parks) intercepte la frappe Tomonaga: 25 chasseurs vs escorte de 36 Zeros — 13 F2A/F4F perdus, 7 endommagés", "u": 5}, {"t": 1830, "type": "attack", "side": "IJN", "s": "La frappe Tomonaga bombarde Midway (06:30-06:43): dégâts importants aux installations, pistes restent utilisables", "u": 5}, {"t": 1860, "type": "report", "side": "IJN", "s": "Tomonaga : \"il est nécessaire de procéder à une deuxième attaque\" (Kawa·Kawa·Kawa 109)", "u": 3}, {"t": 1866, "type": "launch_start", "side": "USN", "s": "TF-16 commence à lancer à ~155 nm de la position estimée de la KB (limite TBD); lancement long (~1h), escadrilles séparées en route", "u": 4}, {"t": 1870, "type": "attack", "side": "USN", "s": "6 TBF (Fieberling) + 4 B-26 (Collins) attaquent la KB sans escorte: aucun coup, 5 TBF et 2 B-26 perdus; un B-26 frôle la passerelle de l'Akagi", "u": 5}, {"t": 1875, "type": "decision", "side": "IJN", "s": "Nagumo ordonne le réarmement des B5N (torpilles -> bombes) pour 2e frappe sur Midway", "u": 5}, {"t": 1888, "type": "sighting", "side": "IJN", "s": "Hydravion n°4 du Tone signale 10 navires ennemis", "u": 5}, {"t": 1905, "type": "decision", "side": "IJN", "s": "Nagumo suspend le réarmement (ordre \"préparez-vous à attaquer les unités de flotte; laissez les torpilles aux appareils non encore réarmés\") et demande au Tone n°4 de préciser la composition ennemie", "u": 5}, {"t": 1915, "type": "attack", "side": "USN", "s": "16 SBD-2 VMSB-241 (Henderson) attaquent le Hiryū en glide-bombing: aucun coup, 8 perdus dont Henderson", "u": 5}, {"t": 1930, "type": "attack", "side": "USN", "s": "B-17 (Sweeney) bombardent les CV depuis ~6000 m: aucun coup", "u": 10}, {"t": 1940, "type": "attack", "side": "USN", "s": "11 SB2U (Norris) attaquent le Haruna: aucun coup", "u": 10}, {"t": 1940, "type": "report", "side": "IJN", "s": "Tone n°4 : \"l'ennemi est accompagné de ce qui semble être un porte-avions\" — le pivot informationnel de la bataille", "u": 5}, {"t": 1950, "type": "report", "side": "IJN", "s": "Yamaguchi (signal au Nagumo) : \"considère souhaitable de lancer la force d'attaque immédiatement\" — avec les D3A disponibles, sans escorte complète", "u": 10}, {"t": 1957, "type": "recovery_start", "side": "IJN", "s": "La KB commence à récupérer la frappe Tomonaga + la CAP (ponts monopolisés ~35 min)", "u": 5}, {"t": 1958, "type": "launch_start", "side": "USN", "s": "Yorktown lance: 17 VB-3, 12 VT-3, 6 VF-3 (Fletcher garde VS-5 en réserve) — fin ~09:06", "u": 5}, {"t": 1975, "type": "decision", "side": "IJN", "s": "Nagumo refuse la frappe immédiate: récupérer d'abord, puis frapper en force constituée vers 10:30 (\"fenêtre des 65 minutes\")", "u": 10}, {"t": 1990, "type": "recovery_end", "side": "IJN", "s": "Récupération terminée; réarmement/ravitaillement généralisé en hangar", "u": 10}, {"t": 1997, "type": "course_change", "side": "IJN", "s": "La KB vire au 070 (ENE) vers les porte-avions US — la frappe du Hornet (cap 265→240?) la manque en partie", "u": 5}, {"t": 2000, "type": "attack", "side": "USN", "s": "VT-8 (Waldron, 15 TBD seuls, sans escorte) attaque: tous abattus (~09:36), 1 survivant (Ens. Gay); aucun coup", "u": 5}, {"t": 2018, "type": "attack", "side": "USN", "s": "VT-6 (Lindsey, 14 TBD) attaque par les deux bords: 10 perdus, aucun coup; la CAP reste tirée à basse altitude", "u": 5}, {"t": 2035, "type": "decision", "side": "USN", "s": "McClusky, à sec de réserve, prolonge la recherche puis vire N-O; repère le sillage de l'Arashi (qui regagne la KB après avoir grenadé le Nautilus) et le suit", "u": 10}, {"t": 2042, "type": "sighting", "side": "USN", "s": "McClusky (CEAG, groupe Enterprise) repère la KB à ~35 nm au NE en suivant le sillage de l'Arashi — déclenche l'attaque en piqué", "u": 3}, {"t": 2055, "type": "attack", "side": "USN", "s": "VT-3 (Massey, 12 TBD) + VF-3 (Thach, 6 F4F) attaquent: 10 TBD perdus, aucun coup; Thach Weave employé pour la première fois; la CAP entière est au ras de l'eau", "u": 5}, {"t": 2060, "type": "spot", "side": "IJN", "s": "État réel des ponts (contra Fuchida): frappes encore en hangar, ponts occupés par la CAP; lancement prévu ~10:30-11:00", "u": 10}, {"t": 2062, "type": "hit", "side": "USN", "s": "VB-6/VS-6 frappent Kaga et Akagi; VB-3 frappe Sōryū (10:22–10:26)", "u": 2}, {"t": 2062, "type": "hit", "side": "USN", "s": "VS-6 + VB-6 (McClusky) plongent: Kaga touché 4-5 bombes (10:22-10:26) — hangars pleins de munitions: incendies incontrôlables", "u": 2}, {"t": 2065, "type": "hit", "side": "USN", "s": "VB-3 (Leslie): 3 coups sur le Sōryū — en flammes, stoppé à 10:40", "u": 2}, {"t": 2066, "type": "hit", "side": "USN", "s": "Section Best (3 SBD VB-6): 1 coup fatal sur l'Akagi (ascenseur central, hangar) + 1 near-miss arrière qui bloque le gouvernail? — incendies", "u": 2}, {"t": 2071, "type": "course_change", "side": "IJN", "s": "Le reliquat de la KB (Hiryū + escorte, Abe puis Yamaguchi) maintient le cap N-NE: continuer le combat et garder la portée de frappe", "u": 15}, {"t": 2085, "type": "recovery_start", "side": "USN", "s": "TF-16 interrompt sa progression SO: récupérations successives des raids du matin (SBD, chasse, rescapés VT, puis avions du Yorktown) face au vent d'E-SE — dérive nette vers le NE jusqu'à ~15:00", "u": 15}, {"t": 2086, "type": "other", "side": "IJN", "s": "Nagumo évacue l'Akagi et transfère sa marque sur le Nagara; Abe (CruDiv 8) commande l'intérim", "u": 10}, {"t": 2094, "type": "launch_start", "side": "IJN", "s": "Hiryū lance sa 1re frappe: 18 D3A + 6 A6M (Kobayashi), guidés en suivant les avions US au retour", "u": 5}, {"t": 2152, "type": "sighting", "side": "USN", "s": "Radar du Yorktown détecte le raid à ~32 nm; CAP renforcée, ravitaillement coupé, SBD éloignés du navire", "u": 5}, {"t": 2165, "type": "attack", "side": "IJN", "s": "Attaque Kobayashi (7 D3A passent la CAP): 3 bombes touchent le Yorktown (12:11-12:16); chaudières stoppées; Kobayashi tué", "u": 8}, {"t": 2251, "type": "launch_start", "side": "IJN", "s": "Hiryū lance sa 2e frappe: 10 B5N + 6 A6M (Tomonaga, réservoir gauche non réparé — aller simple assumé)", "u": 5}, {"t": 2260, "type": "other", "side": "USN", "s": "Yorktown remis en route ~19 nds, incendies maîtrisés — si bien réparé que la 2e frappe le croira intact (« 2e porte-avions »)", "u": 15}, {"t": 2310, "type": "attack", "side": "IJN", "s": "Attaque Tomonaga: 2 torpilles touchent le Yorktown (~14:43); gîte 23°; Tomonaga abattu", "u": 8}, {"t": 2325, "type": "sighting", "side": "USN", "s": "SBD de VS-5 (Adams, recherche lancée 13:30) localise le Hiryū: \"1 CV, 2 BB, 3 CA, 4 DD, 31°15'N 179°05'W\"", "u": 5}, {"t": 2335, "type": "course_change", "side": "USN", "s": "TF-16 vient au NO pour fermer la distance sur le Hiryū localisé par VS-5 (rapport Adams 14:45) avant de lancer", "u": 15}, {"t": 2340, "type": "other", "side": "USN", "s": "Buckmaster ordonne l'évacuation du Yorktown (crainte de chavirage)", "u": 10}, {"t": 2370, "type": "launch_start", "side": "USN", "s": "Enterprise lance 24 SBD (dont 10 ex-VB-3 du Yorktown) sur le Hiryū", "u": 10}, {"t": 2461, "type": "hit", "side": "USN", "s": "4 bombes sur le Hiryū (avant, ascenseur projeté contre l'îlot); incendies généralisés; attaque Hornet (17:30) et B-17 sans résultat ensuite", "u": 5}, {"t": 2520, "type": "course_change", "side": "IJN", "s": "Retraite générale de la force de Nagumo vers le NO au crépuscule (regroupement prévu avec le corps principal)", "u": 30}, {"t": 2580, "type": "other", "side": "USN", "s": "Recherche du soir de Norris (Vindicators VMSB-241) vers le CV en feu; aucun contact, météo se dégrade — le Vindicator de Norris est perdu (Norris et Pfc Whittington disparus)", "u": 15}, {"t": 2587, "type": "decision", "side": "USN", "s": "Spruance refuse la poursuite à l'ouest de nuit et fait route à l'est jusqu'à minuit — évite la tentative d'engagement nocturne de Yamamoto", "u": 15}, {"t": 2593, "type": "sinking", "side": "IJN", "s": "Le Sōryū coule (torpilles de l'Isokaze); Yanagimoto reste à bord (~711 morts)", "u": 5}, {"t": 2605, "type": "sinking", "side": "IJN", "s": "Le Kaga coule (torpilles du Hagikaze) (~811 morts — la plus lourde perte humaine des 4 CV)", "u": 5}, {"t": 2881, "type": "course_change", "side": "USN", "s": "Minuit: fin de la jambe est défensive; TF-16 vient au nord puis à l'ouest (plan annoncé de Spruance) pour être en position de frapper à l'aube", "u": 20}, {"t": 2895, "type": "decision", "side": "IJN", "s": "Yamamoto ordonne le regroupement pour un engagement de nuit / bombardement de Midway par CruDiv 7 — puis y renonce", "u": 30}, {"t": 3015, "type": "sighting", "side": "both", "s": "Le Tambor est aperçu par CruDiv 7; ordre de virage d'urgence simultané", "u": 10}, {"t": 3023, "type": "collision", "side": "IJN", "s": "Le Mogami éperonne le Mikuma: proue détruite, vitesse réduite à ~12 nds; les deux croiseurs + 2 DD restent en arrière", "u": 10}, {"t": 3055, "type": "decision", "side": "IJN", "s": "Yamamoto annule l'opération MI; retraite générale", "u": 15}, {"t": 3180, "type": "scuttling", "side": "IJN", "s": "L'Akagi est sabordé (torpilles de 4 destroyers), coule ~05:20", "u": 20}, {"t": 3190, "type": "scuttling", "side": "IJN", "s": "Le Makigumo torpille le Hiryū (Kaku et Yamaguchi restent à bord); il flotte encore des heures — photographié par un B4Y du Hōshō, des survivants seront repêchés", "u": 15}, {"t": 3210, "type": "course_change", "side": "USN", "s": "TF-16 reprend la poursuite vers l'ouest au matin (rapports de CV en flammes + contacts de la nuit)", "u": 30}, {"t": 3365, "type": "attack", "side": "USN", "s": "VMSB-241 attaque Mogami/Mikuma; le SBD de Fleming s'écrase sur la tourelle arrière du Mikuma", "u": 10}, {"t": 3432, "type": "sinking", "side": "IJN", "s": "Le Hiryū coule", "u": 10}, {"t": 3600, "type": "decision", "side": "USN", "s": "Décision de sauver le Yorktown: équipe de sauvetage à bord, remorquage par le Vireo, escorte constituée", "u": 60}, {"t": 3960, "type": "attack", "side": "USN", "s": "~58 SBD de TF-16 (puis B-17) attaquent le Tanikaze, seul — aucun coup; il abat 1 SBD", "u": 20}, {"t": 4725, "type": "sighting", "side": "USN", "s": "Reconnaissance matinale de l'Enterprise relocalise Mogami/Mikuma et leurs 2 DD; TF-16 met le cap dessus", "u": 15}, {"t": 4770, "type": "sighting", "side": "USN", "s": "2e contact du matin: \"2 CA, 2 DD, 28°55'N 175°10'E, cap 215, 15 nds\" (le même groupe Mogami/Mikuma, fixes d'estime divergents)", "u": 10}, {"t": 4800, "type": "launch_start", "side": "USN", "s": "TF-16 lance la 1re frappe sur Mogami/Mikuma (~26 SBD du Hornet)", "u": 15}, {"t": 4910, "type": "attack", "side": "USN", "s": "1re frappe: coups sur Mogami et Mikuma", "u": 15}, {"t": 4965, "type": "launch_start", "side": "USN", "s": "TF-16 lance la 2e frappe (31 SBD de l'Enterprise, mix VB-6/VS-6/VB-3)", "u": 15}, {"t": 5040, "type": "attack", "side": "USN", "s": "2e frappe: Mikuma dévasté; Mogami et un DD touchés", "u": 15}, {"t": 5130, "type": "launch_start", "side": "USN", "s": "TF-16 lance la 3e frappe (24 SBD du Hornet)", "u": 15}, {"t": 5136, "type": "hit", "side": "IJN", "s": "I-168 (Tanabe) torpille à travers l'écran: 2 torpilles dans le Yorktown, 1 dans le Hammann (coule en 4 min, explosion de ses grenades ASM)", "u": 5}, {"t": 5205, "type": "attack", "side": "USN", "s": "3e frappe: le Mikuma est achevé (coule dans la soirée); le Mogami s'échappe vers Truk", "u": 15}, {"t": 5467, "type": "course_change", "side": "USN", "s": "Spruance rompt la poursuite (carburant des destroyers, proximité de Wake) et fait route NE vers le ravitaillement", "u": 30}, {"t": 5490, "type": "sinking", "side": "IJN", "s": "Le Mikuma coule (première perte de croiseur lourd IJN)", "u": 60}, {"t": 6181, "type": "sinking", "side": "USN", "s": "Le Yorktown chavire et coule à l'aube", "u": 30}], "contacts": [{"t": 1888, "lat": 32.1, "lon": -176.5, "s": "10 navires, apparemment ennemis, relèvement 010, distance 240 nm de Midway, cap 150, vitesse >20 nds"}, {"t": 1940, "lat": 31.8, "lon": -176.7, "s": "L'ennemi est accompagné de ce qui semble être un porte-avions (suivi 08:30: +2 croiseurs)"}, {"t": 1792, "lat": 30.5, "lon": -179.55, "s": "2 carriers and battleships bearing 320 distance 180 course 135 speed 25"}, {"t": 2325, "lat": 31.25, "lon": -179.083, "s": "1 CV, 2 BB, 3 CA, 4 DD, cap nord, 31°15'N 179°05'W"}, {"t": 4725, "lat": 29.55, "lon": -185.17, "s": "1 CV, 5 DD, cap 270 (8-B-2; \"CV\" = erreur d'identification: Mogami/Mikuma)"}, {"t": 4770, "lat": 28.92, "lon": -184.83, "s": "2 CA, 2 DD, cap 215, 15 nds"}, {"t": 3990, "lat": 33.0, "lon": -183.0, "s": "1 CL attaqué, résultat indéterminé (en réalité le DD Tanikaze, indemne)"}], "tmax": 6301, "build": {"gen": "2026-06-13 09:22 UTC", "db_hash": "5e667534", "n_ev": 90, "n_pos": 60, "n_inf": 100}};
+const LAT0=28.21, LON0=-177.37, RAD=Math.PI/180;
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+let T=270, playing=false, scale=1.0, panX=0, panY=-120;
+const slider=document.getElementById('slider'); slider.max=D.tmax;
+const zoomCtl=document.getElementById('zoom');
+const colors={USN:'#1f6fce',IJN:'#d23b3b'};
+const THEMES={
+ light:{bg:'#ffffff',grid:'#e6ecf2',gridLbl:'#9aa7b5',ring:'#d7e1ea',idl:'#b8c6d8',
+        label:'#16212e',sub:'#5a6b80',wreck:'#7d8893',midway:'#b07900',contact:'#b07900',stale:.5},
+ dark:{bg:'#0b1220',grid:'#16243d',gridLbl:'#2c4060',ring:'#27406b',idl:'#31496e',
+       label:'#f0f4f8',sub:'#8fa3bd',wreck:'#888',midway:'#ffd479',contact:'#ffd479',stale:.5}};
+let theme='light';
+
+function unwrap(lon){ return lon>0 ? lon-360 : lon; }
+function pxnm(){ return Math.min(cv.width,cv.height)/900; }
+function proj(lat,lon){
+  const x=(unwrap(lon)-LON0)*60*Math.cos(LAT0*RAD), y=(lat-LAT0)*60;
+  return [cv.width/2 + (x+panX)*scale*pxnm(), cv.height/2 - (y+panY)*scale*pxnm()];
+}
+function fmt(t){
+  t=Math.floor(t);
+  const d=3+Math.floor(t/1440), h=Math.floor((t%1440)/60), m=t%60;
+  return `${d} juin 1942 — ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')} (GMT−12)`;
+}
+function cardinal(b){return ['N','NE','E','SE','S','SO','O','NO'][Math.round(((b%360)+360)%360/45)%8];}
+function routeTo(a,b){
+  const dlat=(b.lat-a.lat)*60, dlon=(unwrap(b.lon)-unwrap(a.lon))*60*Math.cos(LAT0*RAD);
+  return (Math.atan2(dlon,dlat)*180/Math.PI+360)%360;
+}
+function distNm(a,b){
+  const dlat=(b.lat-a.lat)*60, dlon=(unwrap(b.lon)-unwrap(a.lon))*60*Math.cos(LAT0*RAD);
+  return Math.hypot(dlat,dlon);
+}
+function interp(track,t){
+  if(t<track[0].t) return null;
+  for(let i=0;i<track.length-1;i++){
+    const a=track[i], b=track[i+1];
+    if(t>=a.t && t<=b.t){
+      const f=(t-a.t)/Math.max(1,b.t-a.t);
+      return {lat:a.lat+f*(b.lat-a.lat), lon:unwrap(a.lon)+f*(unwrap(b.lon)-unwrap(a.lon)),
+              err:a.err+f*(b.err-a.err), route:routeTo(a,b)};
+    }
+  }
+  const last=track[track.length-1];
+  if(t-last.t<360){
+    const prev=track.length>1?track[track.length-2]:null;
+    // piste périmée: l'incertitude CROÎT avec le temps écoulé (~5 nm/h, plafond 90)
+    const grown=Math.min(90, last.err + (t-last.t)/60*5);
+    return {lat:last.lat,lon:unwrap(last.lon),err:grown,stale:true,
+            route:prev?routeTo(prev,last):null};
+  }
+  return null;
+}
+const entById={}; D.entities.forEach(e=>entById[e.id]=e);
+function posOf(entId,t){ // position d'une entité (piste, Midway, ou épave)
+  if(entId==='SH-MIDWAY') return {lat:28.21,lon:-177.37};
+  if(entById[entId]) return interp(entById[entId].track,t);
+  const w=D.wrecks.find(w=>w.ent===entId); return w?{lat:w.lat,lon:w.lon}:null;
+}
+function isSunk(entId,t){ const w=D.wrecks.find(w=>w.ent===entId); return w&&t>=w.t; }
+
+let clickables=[], selWp=null;
+function draw(){
+  clickables=[];
+  const P=THEMES[theme];
+  cv.width=cv.parentElement.clientWidth; cv.height=cv.parentElement.clientHeight;
+  ctx.fillStyle=P.bg; ctx.fillRect(0,0,cv.width,cv.height);
+  // grille
+  ctx.strokeStyle=P.grid; ctx.lineWidth=1; ctx.fillStyle=P.gridLbl; ctx.font='9px Verdana';
+  for(let la=26;la<=34;la++){ const [x1,y1]=proj(la,-188), [x2,y2]=proj(la,-170);
+    ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke(); ctx.fillText(la+'°N',8,y1-3);}
+  for(let lo=-188;lo<=-170;lo+=2){ const [x1,y1]=proj(26,lo), [x2,y2]=proj(34,lo);
+    ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+    const lbl=lo<-180?(360+lo)+'°E':(-lo)+'°W'; ctx.fillText(lbl,x1+3,cv.height-8);}
+  ctx.setLineDash([4,4]); ctx.strokeStyle=P.idl;
+  const [ax1,ay1]=proj(25.5,-180), [ax2,ay2]=proj(34.5,-180);
+  ctx.beginPath();ctx.moveTo(ax1,ay1);ctx.lineTo(ax2,ay2);ctx.stroke(); ctx.setLineDash([]);
+  // Midway + anneaux
+  const [mx,my]=proj(LAT0,LON0);
+  ctx.strokeStyle=P.ring;
+  [100,200,300].forEach(r=>{ctx.beginPath();ctx.arc(mx,my,r*scale*pxnm(),0,7);ctx.stroke();});
+  ctx.fillStyle=P.midway; ctx.beginPath();ctx.arc(mx,my,4,0,7);ctx.fill();
+  ctx.fillText('MIDWAY',mx+7,my+4);
+  // épaves
+  ctx.font='12px Verdana';
+  D.wrecks.forEach(w=>{ if(T>=w.t){ const[x,y]=proj(w.lat,w.lon);
+    ctx.fillStyle=P.wreck; ctx.fillText('✕',x-4,y+4); ctx.font='9px Verdana';
+    ctx.fillText(`${w.name} — coulé ${w.h.split(' ')[2]}`,x+8,y+3); ctx.font='12px Verdana';}});
+  // pistes
+  D.entities.forEach(e=>{
+    const c=colors[e.side];
+    if(document.getElementById('cbTrail').checked){
+      ctx.strokeStyle=c; ctx.globalAlpha=.3; ctx.lineWidth=1.5; ctx.beginPath(); let started=false;
+      for(const p of e.track){ if(p.t>T)break; const[x,y]=proj(p.lat,p.lon);
+        started?ctx.lineTo(x,y):ctx.moveTo(x,y); started=true;}
+      const cur=interp(e.track,T);
+      if(cur&&started){const[x,y]=proj(cur.lat,cur.lon);ctx.lineTo(x,y);}
+      ctx.stroke(); ctx.globalAlpha=1;
+    }
+    e.track.forEach((pt,pi)=>{ if(pt.t<=T){ const[wx,wy]=proj(pt.lat,pt.lon);
+      ctx.fillStyle=pt.cause?c:'#999';
+      ctx.save();ctx.translate(wx,wy);ctx.rotate(Math.PI/4);ctx.fillRect(-3,-3,6,6);ctx.restore();
+      clickables.push({x:wx,y:wy,ent:e.label,pt:pt,trk:e.track,idx:pi});}});
+    if(isSunk(e.id,T)) return;            // coulé: seul le ✕ subsiste
+    const p=interp(e.track,T); if(!p)return;
+    const[x,y]=proj(p.lat,p.lon);
+    if(document.getElementById('cbHalo').checked){
+      const hr=p.err*scale*pxnm();
+      ctx.fillStyle=c; ctx.globalAlpha=.07;
+      ctx.beginPath();ctx.arc(x,y,hr,0,7);ctx.fill();ctx.globalAlpha=.35;
+      ctx.strokeStyle=c; ctx.setLineDash([5,5]);
+      ctx.beginPath();ctx.arc(x,y,hr,0,7);ctx.stroke();
+      ctx.setLineDash([]); ctx.globalAlpha=1;
+      if(scale>=1.8){ // étiquette de l'incertitude sur le bord du halo
+        ctx.fillStyle=P.sub; ctx.font='9px Verdana';
+        ctx.fillText(`±${Math.round(p.err)} nm${p.stale?' (périmée)':''}`,x+hr*0.71+3,y-hr*0.71-3);
+        ctx.font='12px Verdana';}}
+    const fire=D.fires.find(f=>f.ent===e.id&&T>=f.t0&&T<f.t1);
+    if(fire){ // en feu: flamme vacillante, pas de flèche (stoppé/dérive)
+      const fl=.6+.4*Math.sin(Date.now()/110+x);
+      ctx.globalAlpha=fl; ctx.font='14px Verdana'; ctx.fillText('🔥',x-7,y+5); ctx.globalAlpha=1;
+    } else if(p.route!=null){ // en route: flèche orientée
+      ctx.fillStyle=c; ctx.save();ctx.translate(x,y);ctx.rotate(p.route*RAD);
+      ctx.beginPath();ctx.moveTo(0,-9);ctx.lineTo(5.5,7);ctx.lineTo(0,3.5);ctx.lineTo(-5.5,7);
+      ctx.closePath();ctx.fill();ctx.restore();
+      if(p.stale){ctx.strokeStyle=c;ctx.beginPath();ctx.arc(x,y,11,0,7);ctx.stroke();}
+    } else { ctx.fillStyle=c; ctx.beginPath();ctx.arc(x,y,5,0,7);ctx.fill(); }
+    ctx.fillStyle=P.label; ctx.font='bold 11px Verdana';
+    ctx.fillText(e.label+(fire?' (en feu)':''),x+10,y+1);
+    if(e.sub){ctx.fillStyle=P.sub; ctx.font='9px Verdana'; ctx.fillText(e.sub,x+10,y+13);}
+    ctx.font='12px Verdana';
+  });
+  // waypoint sélectionné: surligner ses segments entrant/sortant
+  if(selWp){
+    const [sx,sy]=proj(selWp.pt.lat,selWp.pt.lon);
+    ctx.strokeStyle='#ff7a00'; ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(sx,sy,9,0,7);ctx.stroke();
+    if(selWp.idx>0){ // segment entrant (fin, pointillé)
+      const a=selWp.trk[selWp.idx-1], [ax,ay]=proj(a.lat,a.lon);
+      ctx.setLineDash([4,4]); ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(sx,sy);ctx.stroke(); ctx.setLineDash([]);
+    }
+    if(selWp.idx<selWp.trk.length-1){ // segment sortant (épais + flèche)
+      const b=selWp.trk[selWp.idx+1], [bx2,by2]=proj(b.lat,b.lon);
+      ctx.lineWidth=3;
+      ctx.beginPath();ctx.moveTo(sx,sy);ctx.lineTo(bx2,by2);ctx.stroke();
+      const ang=Math.atan2(by2-sy,bx2-sx), mxp=(sx+bx2)/2, myp=(sy+by2)/2;
+      ctx.fillStyle='#ff7a00';
+      ctx.save();ctx.translate(mxp,myp);ctx.rotate(ang);
+      ctx.beginPath();ctx.moveTo(8,0);ctx.lineTo(-5,-5);ctx.lineTo(-5,5);ctx.closePath();ctx.fill();ctx.restore();
+    }
+    ctx.lineWidth=1;
+  }
+  // repérages: "qui voit qui" — œil pulsant sur l'entité repérée
+  D.spots.forEach(sp=>{ if(T>=sp.t-2&&T<=sp.t+12){
+    const p=posOf(sp.ent,T); if(!p)return; const[x,y]=proj(p.lat,p.lon);
+    const ph=(Date.now()/500)%1;
+    ctx.strokeStyle='#e6a700'; ctx.globalAlpha=(1-ph)*.8; ctx.lineWidth=2;
+    ctx.beginPath();ctx.arc(x,y,6+ph*18,0,7);ctx.stroke();
+    ctx.globalAlpha=1; ctx.lineWidth=1;
+    ctx.font='12px Verdana'; ctx.fillText('👁',x-6,y-14);
+    if(scale>=1.3){ctx.fillStyle='#b07900';ctx.font='9px Verdana';
+      ctx.fillText('repéré: '+sp.s+'…',x+14,y-16);ctx.font='12px Verdana';}}});
+  // combats: pulsations sur la cible
+  D.combats.forEach(cb=>{ if(T>=cb.t0&&T<=cb.t1){
+    const p=posOf(cb.ent,T); if(!p)return; const[x,y]=proj(p.lat,p.lon);
+    const ph=(Date.now()/650)%1;
+    [ph,(ph+0.5)%1].forEach(q=>{
+      ctx.strokeStyle='#ff7a00'; ctx.globalAlpha=(1-q)*.85; ctx.lineWidth=2.5;
+      ctx.beginPath();ctx.arc(x,y,7+q*26,0,7);ctx.stroke();});
+    ctx.globalAlpha=1; ctx.lineWidth=1;
+    ctx.fillStyle='#ff7a00'; ctx.font='bold 12px Verdana'; ctx.fillText('✸',x-5,y-12);
+    ctx.font='12px Verdana';}});
+  // raids — dénombrables au zoom: 1 point = 1 avion, attrition au point d'attaque
+  if(document.getElementById('cbRaid').checked){
+    D.raids.forEach(r=>{
+      const launching=r.tl!=null && T>=r.tl && T<r.t0;
+      if(launching || (T>=r.t0&&T<=r.t1)){
+      const f=launching?0:(T-r.t0)/(r.t1-r.t0);
+      const lat=r.a[0]+f*(r.b[0]-r.a[0]), lon=unwrap(r.a[1])+f*(unwrap(r.b[1])-unwrap(r.a[1]));
+      const[x,y]=proj(lat,lon); const c=colors[r.side];
+      ctx.strokeStyle=c; ctx.globalAlpha=.4;
+      const[xa,ya]=proj(r.a[0],r.a[1]); ctx.setLineDash([2,3]);
+      ctx.beginPath();ctx.moveTo(xa,ya);ctx.lineTo(x,y);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;
+      const after=r.ta!=null && T>=r.ta;
+      let n=after ? Math.max(0,r.n0-r.lost) : r.n0;
+      if(launching) n=Math.max(1,Math.round(r.n0*(T-r.tl)/Math.max(1,r.t0-r.tl))); // décollages en cours
+      const par=r.par||1;
+      if(par>1) n=Math.max(1,Math.round(n/par)); // éventail: l'effectif se répartit entre les lignes
+      if(scale>=2.2 && r.n0>0){
+        // formation en coin (V), 1 point/avion (paquets de 2 au-delà de 60)
+        const pack=r.n0>60?2:1, shown=Math.ceil(n/pack);
+        const[xb,yb]=proj(r.b[0],r.b[1]);
+        const ang=Math.atan2(yb-y,xb-x);
+        ctx.save();ctx.translate(x,y);ctx.rotate(ang+Math.PI/2);
+        ctx.fillStyle=c;
+        for(let i=0;i<shown;i++){
+          const row=Math.floor((-1+Math.sqrt(1+8*i))/2), k=i-row*(row+1)/2;
+          const px=(k-row/2)*7, py=row*6;
+          ctx.beginPath();ctx.arc(px,py,2,0,7);ctx.fill();
+        }
+        // avions perdus: points gris qui s'estompent pendant 20 min après l'attaque
+        if(after && r.lost>0 && T<=r.ta+20){
+          ctx.globalAlpha=Math.max(0,1-(T-r.ta)/20)*.8; ctx.fillStyle='#888';
+          const lostShown=Math.ceil(r.lost/pack);
+          for(let i=0;i<lostShown;i++){
+            const row=Math.floor((-1+Math.sqrt(1+8*(i+shown)))/2), k=(i+shown)-row*(row+1)/2;
+            ctx.beginPath();ctx.arc((k-row/2)*7,row*6+9+(T-r.ta)*0.8,2,0,7);ctx.fill();
+          }
+          ctx.globalAlpha=1;
+        }
+        ctx.restore();
+        ctx.fillStyle=P.label; ctx.font='bold 9px Verdana';
+        ctx.fillText(`${par>1?'≈':''}${n}${pack>1?' (1 pt = 2)':''} av.${par>1?'/ligne':''}${launching?' — décollage…':''}`,x+10,y+4);
+      } else {
+        ctx.fillStyle=c; ctx.font='13px Verdana'; ctx.fillText('✛',x-5,y+5);
+        if(scale>=1.3 && r.n0>0){ctx.font='bold 9px Verdana';ctx.fillStyle=P.label;
+          ctx.fillText(`${par>1?'≈':''}${n} av.${par>1?'/ligne':''}${launching?' — décollage…':''}`,x+9,y+10);}
+      }
+      ctx.font='9px Verdana'; ctx.fillStyle=P.sub;
+      ctx.fillText(r.mid.replace(/MS-060[346]-/,''),x+8,y-6);
+      ctx.font='12px Verdana';}});
+  }
+
+  // monde perçu
+  if(document.getElementById('cbPercu').checked){
+    D.contacts.forEach(c=>{ if(T>=c.t&&T<=c.t+180){ const[x,y]=proj(c.lat,c.lon);
+      ctx.strokeStyle=P.contact;ctx.setLineDash([3,3]);
+      ctx.beginPath();ctx.arc(x,y,12,0,7);ctx.stroke();ctx.setLineDash([]);
+      ctx.fillStyle=P.contact;ctx.font='9px Verdana';
+      ctx.fillText('contact rapporté: '+c.s.slice(0,40)+'…',x+15,y);ctx.font='12px Verdana';}});
+  }
+  // boussole
+  const bx=cv.width-52, by=52, br=30;
+  ctx.strokeStyle=P.ring; ctx.fillStyle=P.bg;
+  ctx.beginPath();ctx.arc(bx,by,br,0,7);ctx.fill();ctx.stroke();
+  for(let a=0;a<360;a+=45){const r1=a%90?br-5:br-8, rad=(a-90)*RAD;
+    ctx.beginPath();ctx.moveTo(bx+Math.cos(rad)*r1,by+Math.sin(rad)*r1);
+    ctx.lineTo(bx+Math.cos(rad)*br,by+Math.sin(rad)*br);ctx.stroke();}
+  ctx.fillStyle='#d23b3b';ctx.beginPath();
+  ctx.moveTo(bx,by-br+6);ctx.lineTo(bx-5,by);ctx.lineTo(bx+5,by);ctx.closePath();ctx.fill();
+  ctx.fillStyle=P.label;ctx.font='bold 10px Verdana';ctx.textAlign='center';
+  ctx.fillText('N',bx,by-br+16);ctx.font='9px Verdana';
+  ctx.fillText('E',bx+br-12,by+3);ctx.fillText('S',bx,by+br-8);ctx.fillText('O',bx-br+12,by+3);
+  ctx.textAlign='left';
+  document.getElementById('clock').textContent=fmt(T);
+  slider.value=Math.round(T);
+}
+const feed=document.getElementById('feed');
+let userScrollUntil=0, progScroll=false;
+function buildFeed(){ // construit le fil UNE fois; clic = sauter à l'instant de l'événement
+  feed.innerHTML=D.events.map((e,i)=>
+   `<div class="ev ${e.side}" id="ev${i}" data-t="${e.t}" title="cliquer: aller à cet instant">
+     <span class="t">${fmt(e.t).split('— ')[1].split(' ')[0]} J${3+Math.floor(e.t/1440)}</span>
+     ${e.u?`±${e.u}'`:''} — ${e.s}</div>`).join('');
+  feed.querySelectorAll('.ev').forEach(div=>{
+    div.onclick=()=>{ T=parseFloat(div.dataset.t); updateFeed(true); };
+  });
+  feed.addEventListener('scroll',()=>{ if(!progScroll) userScrollUntil=Date.now()+5000; });
+}
+let lastCur=-1;
+function updateFeed(force){
+  // événement courant = dernier événement passé (ou tout proche)
+  let cur=-1;
+  for(let i=0;i<D.events.length;i++){ if(D.events[i].t<=T+1) cur=i; else break; }
+  if(cur===lastCur && !force) return;
+  lastCur=cur;
+  D.events.forEach((e,i)=>{
+    const div=document.getElementById('ev'+i);
+    div.classList.toggle('cur', i===cur || Math.abs(e.t-T)<=15);
+    div.classList.toggle('past', e.t<T-60 && i!==cur);
+  });
+  // suivi auto: pendant la lecture (sauf si l'utilisateur vient de scroller), ou après un saut
+  if(cur>=0 && (force || (playing && Date.now()>userScrollUntil))){
+    progScroll=true;
+    document.getElementById('ev'+cur).scrollIntoView({block:'center',behavior:force?'auto':'smooth'});
+    setTimeout(()=>progScroll=false,400);
+  }
+}
+let lastFrame=performance.now();
+function speedFactor(){ return Math.pow(10, parseFloat(document.getElementById('speed').value)); }
+function updateSpeedLbl(){
+  const f=speedFactor();
+  document.getElementById('speedlbl').textContent='×'+(f<100?f.toFixed(0):Math.round(f/10)*10);
+}
+function tick(){
+  const now=performance.now(), dt=(now-lastFrame)/1000; lastFrame=now;
+  if(playing){
+    T=Math.min(D.tmax, T + speedFactor()*dt/60);   // facteur = secondes simulées / seconde réelle
+    if(T>=D.tmax){playing=false;document.getElementById('play').textContent='▶ Lecture';}}
+  draw();
+  updateFeed(false);
+  requestAnimationFrame(tick);
+}
+document.getElementById('speed').oninput=updateSpeedLbl;
+updateSpeedLbl();
+document.getElementById('build').textContent=
+  `build ${D.build.gen} · base #${D.build.db_hash} · ${D.build.n_ev} évts · ${D.build.n_pos} pos · ${D.build.n_inf} inférences`;
+document.title=`Midway 1942 — Replay (build ${D.build.gen}, base #${D.build.db_hash})`;
+document.getElementById('play').onclick=()=>{playing=!playing;
+  document.getElementById('play').textContent=playing?'⏸ Pause':'▶ Lecture';};
+slider.oninput=()=>{T=parseInt(slider.value); updateFeed(true);};
+zoomCtl.oninput=()=>{scale=parseFloat(zoomCtl.value);};
+document.getElementById('zoomin').onclick=()=>{scale=Math.min(10,scale*1.25);zoomCtl.value=scale;};
+document.getElementById('zoomout').onclick=()=>{scale=Math.max(.4,scale/1.25);zoomCtl.value=scale;};
+document.getElementById('legclose').onclick=()=>{
+  document.getElementById('legend').style.display='none';
+  document.getElementById('legbtn').style.display='block';};
+document.getElementById('legbtn').onclick=()=>{
+  document.getElementById('legend').style.display='block';
+  document.getElementById('legbtn').style.display='none';};
+document.getElementById('themebtn').onclick=()=>{
+  theme=theme==='light'?'dark':'light';
+  document.body.classList.toggle('dark',theme==='dark');
+  document.getElementById('themebtn').textContent=theme==='light'?'🌙 sombre':'☀ clair';};
+cv.parentElement.addEventListener('wheel',e=>{e.preventDefault();
+  scale=Math.max(.4,Math.min(10,scale*(e.deltaY<0?1.1:0.9)));zoomCtl.value=scale;},{passive:false});
+let drag=null, dragDist=0;
+cv.parentElement.addEventListener('mousedown',e=>{drag=[e.clientX,e.clientY];dragDist=0;});
+window.addEventListener('mousemove',e=>{if(drag){
+  dragDist+=Math.abs(e.clientX-drag[0])+Math.abs(e.clientY-drag[1]);
+  panX+=(e.clientX-drag[0])/(scale*pxnm()); panY-=(e.clientY-drag[1])/(scale*pxnm());
+  drag=[e.clientX,e.clientY];}});
+window.addEventListener('mouseup',e=>{
+  if(drag&&dragDist<5){
+    const r=cv.getBoundingClientRect(), mx2=e.clientX-r.left, my2=e.clientY-r.top;
+    let best=null,bd=14;
+    clickables.forEach(c=>{const d=Math.hypot(c.x-mx2,c.y-my2); if(d<bd){bd=d;best=c;}});
+    const box=document.getElementById('wpinfo');
+    selWp=best||null;
+    if(best){
+      box.style.display='block';
+      let html=`<b>${best.ent}</b> — waypoint ${best.pt.ts} · méthode <i>${best.pt.m}</i> · ±${best.pt.err} nm`;
+      if(best.idx>0){
+        const prev=best.trk[best.idx-1], rr=routeTo(prev,best.pt), d=distNm(prev,best.pt);
+        html+=`<br><span style="color:var(--txt2)">◀ Arrive</span> par route ${rr.toFixed(0)}° (${cardinal(rr)})`+
+              ` — ${d.toFixed(0)} nm depuis le waypoint ${prev.ts}`+
+              `<br><span style="color:var(--txt2);padding-left:14px">${(prev.cause||'cause du segment précédent inconnue').slice(0,120)}</span>`;
+      }
+      if(best.idx<best.trk.length-1){
+        const nxt=best.trk[best.idx+1], rr=routeTo(best.pt,nxt), d=distNm(best.pt,nxt), dt=nxt.t-best.pt.t;
+        html+=`<br><span style="color:var(--accent)">▶ Repart</span> route <b>${rr.toFixed(0)}° (${cardinal(rr)})</b>`+
+              ` — <b>${d.toFixed(0)} nm en ${dt>=90?(dt/60).toFixed(1)+' h':dt+' min'}</b> jusqu'au waypoint ${nxt.ts}`+
+              `${d<15?' <span style="color:#ff7a00">(segment court — voir le surlignage orange sur la carte)</span>':''}`+
+              `<br><span style="color:var(--accent);padding-left:14px">${(best.pt.cause||'⚠ cause non rattachée')}</span>`;
+      } else {
+        html+=`<br><span style="color:var(--accent)">■ Dernier point</span> — ${(best.pt.cause||'⚠ cause non rattachée')}`;
+      }
+      if(best.pt.note) html+=`<br><span style="color:var(--txt2)">${best.pt.note}</span>`;
+      box.innerHTML=html;
+    } else box.style.display='none';
+  }
+  drag=null;});
+T=270; buildFeed(); updateFeed(true); tick();
+</script></body></html>
