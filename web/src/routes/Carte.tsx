@@ -27,7 +27,7 @@ export default function Carte() {
   const controls: ReplayControls = { ...c, theme };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 46px)' }}>
-      <Controls c={controls} set={set} clock={fmt(T)} T={T || data.tmin} tmin={data.tmin} tmax={data.tmax} onSeek={onSeek} />
+      <Controls c={controls} set={set} clock={fmt(T)} T={T} tmin={data.tmin} tmax={data.tmax} onSeek={onSeek} />
       <div style={{ flex: 1, position: 'relative' }}>
         <ReplayMap data={data} controls={controls} seekRef={seekRef} onClock={setT} onScaleChange={onScaleChange} />
       </div>

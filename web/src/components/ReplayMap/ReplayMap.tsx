@@ -20,11 +20,14 @@ export default function ReplayMap({ data, controls, seekRef, onClock, onScaleCha
     showHalo: true, showTrail: true, showRaid: true, showPercu: false, selWp: null,
   });
   const ctrlRef = useRef(controls);
-  ctrlRef.current = controls;
   const clickRef = useRef<Clickable[]>([]);
 
-  // Expose an imperative seek so the parent's time slider can set T directly.
-  if (seekRef) seekRef.current = (t: number) => { stRef.current.T = t; };
+  // Sync latest controls into the ref + expose an imperative seek for the parent's
+  // time slider. Done after each render (effect) rather than during render.
+  useEffect(() => {
+    ctrlRef.current = controls;
+    if (seekRef) seekRef.current = (t: number) => { stRef.current.T = t; };
+  });
 
   // Boucle d'animation — un seul effet, jamais recréé (cf. generer_carte.py:539-547)
   useEffect(() => {
