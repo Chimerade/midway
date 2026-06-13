@@ -73,9 +73,9 @@ export default function ReplayMap({ data, controls, seekRef, onClock, onScaleCha
     const up = (e: MouseEvent) => {
       if (drag && dist < 5) {
         const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
-        let best: Clickable | null = null, bd = 14;
-        clickRef.current.forEach((c) => { const d = Math.hypot(c.x - mx, c.y - my); if (d < bd) { bd = d; best = c; } });
-        stRef.current.selWp = best ? { pt: best.pt, trk: best.trk, idx: best.idx } : null;
+        const found: Clickable[] = []; let bd = 14;
+        clickRef.current.forEach((cl) => { const d = Math.hypot(cl.x - mx, cl.y - my); if (d < bd) { bd = d; found[0] = cl; } });
+        const b = found[0] ?? null; stRef.current.selWp = b ? { pt: b.pt, trk: b.trk, idx: b.idx } : null;
       }
       drag = null;
     };
