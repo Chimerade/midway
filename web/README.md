@@ -1,73 +1,39 @@
-# React + TypeScript + Vite
+# Site Midway 1942 (`web/`)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Application React + TypeScript (Vite, React Router) du projet
+[Midway 1942](../README.md). Elle lit des fichiers JSON exportés de la base
+SQLite (`public/data/`, produits par `../data/export_data.py`) — aucune donnée
+n'est embarquée en dur dans le code.
 
-Currently, two official plugins are available:
+## Commandes
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install        # première fois
+npm run dev        # serveur de développement (http://localhost:5173/)
+npm run build      # build statique → dist/ (utilisé par ../tout_regenerer.sh)
+npm test           # tests Vitest
+npm run lint       # ESLint
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Les données sont normalement régénérées par le pipeline racine
+`../tout_regenerer.sh`. Pour ne (re)faire que l'export JSON :
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+python3 ../data/export_data.py ../midway.sqlite public/data
 ```
+
+## Structure
+
+```
+src/
+├── main.tsx, App.tsx        # routeur + montage
+├── layout/                  # menu + coquille
+├── theme/                   # contexte thème clair/sombre
+├── routes/                  # Accueil, Carte, Chronologie, Méthodologie
+├── components/ReplayMap/     # moteur canvas (render.ts), ReplayMap, Controls, Legend, Feed
+├── data/                    # hooks de chargement des JSON
+└── types/                   # contrat TypeScript des données
+```
+
+Le moteur de dessin (`components/ReplayMap/render.ts`) est un portage
+iso-fonctionnel de la carte mono-fichier historique `../carte_midway.html`.
