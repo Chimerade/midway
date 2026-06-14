@@ -1,147 +1,147 @@
-# Spec — Site React multi-pages Midway
+# Spec — Midway React Multi-Page Site
 
-**Date :** 2026-06-13
-**Statut :** Validé (design)
+**Date:** 2026-06-13
+**Status:** Validated (design)
 
-## Objectif
+## Objective
 
-Transformer le projet Midway, aujourd'hui un pipeline de génération de pages HTML
-autoportantes, en un véritable site web React multi-pages avec menu de navigation.
-La donnée doit être **lue depuis des fichiers JSON exportés de la base** plutôt
-qu'embarquée en dur dans le HTML, afin de permettre des évolutions (nouvelles pages,
-nouveaux contenus) sans tout reconstruire.
+Transform the Midway project — currently a pipeline that generates self-contained HTML pages —
+into a proper React multi-page website with a navigation menu.
+Data must be **read from JSON files exported from the database** rather than
+hard-coded into the HTML, so that new pages and content can be added
+without rebuilding everything from scratch.
 
-## Principes
+## Principles
 
-- **Source de vérité inchangée :** les ~25 fichiers `.sql` et `midway.sqlite`
-  restent la source de vérité. Aucune donnée n'est saisie côté front.
-- **Découplage données / présentation :** la base est compilée en JSON granulaire ;
-  React ne connaît que ces JSON. Plus aucune donnée inline dans du HTML.
-- **Portage iso-fonctionnel du replay :** le moteur canvas existant est porté à
-  l'identique (même rendu, mêmes contrôles) avant toute amélioration.
-- **YAGNI :** pas d'API, pas d'édition en ligne, pas de refonte UI, pas de
-  responsive mobile poussé pour cette V1.
+- **Unchanged source of truth:** the ~25 `.sql` files and `midway.sqlite`
+  remain the source of truth. No data is entered on the front end.
+- **Data / presentation decoupling:** the database is compiled into granular JSON;
+  React only knows about those JSON files. No more inline data in HTML.
+- **Iso-functional replay port:** the existing canvas engine is ported
+  identically (same rendering, same controls) before any improvements are made.
+- **YAGNI:** no API, no online editing, no UI redesign, no heavy mobile
+  responsive design for this V1.
 
-## Décisions actées
+## Decisions
 
-| Sujet | Décision |
+| Topic | Decision |
 |---|---|
-| Accès aux données | Export JSON statique (pas d'API, pas de sql.js) |
-| Pages V1 | Accueil, Carte/Replay, Méthodologie, Chronologie |
-| Langage | TypeScript (typer le contrat JSON ↔ canvas) |
-| Portage canvas | Iso-fonctionnel d'abord |
-| Outil de build | Vite |
+| Data access | Static JSON export (no API, no sql.js) |
+| V1 pages | Home, Map/Replay, Methodology, Timeline |
+| Language | TypeScript (to type the JSON ↔ canvas contract) |
+| Canvas port | Iso-functional first |
+| Build tool | Vite |
 | Routing | React Router |
-| Styles | CSS + variables custom (réutilise le thème clair/sombre existant) |
-| State | State React + contexte pour le thème (pas de librairie) |
+| Styles | CSS + custom variables (reuses existing light/dark theme) |
+| State | React state + context for theme (no library) |
 
-## Architecture d'ensemble
+## Overall Architecture
 
-Deux mondes séparés, reliés par un contrat JSON :
+Two separate worlds, connected by a JSON contract:
 
 ```
-data/   (existant, quasi inchangé)          web/   (nouveau, app React/TS)
- ├─ *.sql ─→ midway.sqlite                    ├─ public/data/*.json  ← cible export
- ├─ scripts Python (inférence, simul…)        └─ src/
- └─ export_data.py  ───────[JSON]───────────────→  routes, composants, types
+data/   (existing, nearly unchanged)          web/   (new, React/TS app)
+ ├─ *.sql ─→ midway.sqlite                    ├─ public/data/*.json  ← export target
+ ├─ Python scripts (inference, simulation…)   └─ src/
+ └─ export_data.py  ───────[JSON]───────────────→  routes, components, types
 ```
 
-`export_data.py` (dérivé de `generer_carte.py`) compile la base en JSON.
-React charge les JSON via `fetch`. La source de vérité reste le SQL.
+`export_data.py` (derived from `generer_carte.py`) compiles the database into JSON.
+React loads the JSON via `fetch`. The source of truth remains the SQL.
 
-## Couche d'export (Python)
+## Export Layer (Python)
 
-Nouveau script `data/export_data.py`, reprenant les requêtes SQL de
-`generer_carte.py:21-174`, mais écrivant des fichiers au lieu d'injecter du HTML.
+New script `data/export_data.py`, reusing the SQL queries from
+`generer_carte.py:21-174`, but writing files instead of injecting HTML.
 
-| Fichier exporté | Contenu | Source |
+| Exported file | Contents | Source |
 |---|---|---|
-| `web/public/data/replay.json` | entities, wrecks, fires, combats, spots, raids, events, contacts, tmin, tmax, build | requêtes existantes de `generer_carte.py` |
-| `web/public/data/chronologie.json` | événements enrichis pour la page timeline | table `events` |
-| `web/public/data/meta.json` | tampon de version partagé (db_hash, date de génération) | `generer_carte.py:160-169` |
+| `web/public/data/replay.json` | entities, wrecks, fires, combats, spots, raids, events, contacts, tmin, tmax, build | existing queries from `generer_carte.py` |
+| `web/public/data/chronologie.json` | enriched events for the timeline page | `events` table |
+| `web/public/data/meta.json` | shared version stamp (db_hash, generation date) | `generer_carte.py:160-169` |
 
-Le template HTML + JS de `generer_carte.py` (lignes 177-608) quitte le Python
-pour devenir du React. Le tampon `db_hash` est préservé dans `meta.json` afin de
-conserver la traçabilité base ↔ site.
+The HTML + JS template in `generer_carte.py` (lines 177-608) leaves Python
+and becomes React. The `db_hash` stamp is preserved in `meta.json` to
+maintain database ↔ site traceability.
 
-`generer_carte.py` peut être conservé tel quel pendant la migration (production de
-l'ancien HTML de référence), puis retiré une fois l'équivalence validée.
+`generer_carte.py` can be kept as-is during the migration (to produce the
+reference HTML), then removed once equivalence is validated.
 
-## Structure de l'application React
+## React Application Structure
 
 ```
 web/src/
- ├─ main.tsx, App.tsx          # routeur + layout (menu)
- ├─ layout/  Nav, ThemeToggle  # menu + bascule clair/sombre (contexte)
+ ├─ main.tsx, App.tsx          # router + layout (menu)
+ ├─ layout/  Nav, ThemeToggle  # menu + light/dark toggle (context)
  ├─ routes/
- │   ├─ Home.tsx               # accueil (nouveau)
- │   ├─ Carte.tsx              # héberge <ReplayMap>
- │   ├─ Methodologie.tsx       # prose convertie depuis methodologie_midway.html
- │   └─ Chronologie.tsx        # timeline depuis chronologie.json
+ │   ├─ Home.tsx               # home page (new)
+ │   ├─ Carte.tsx              # hosts <ReplayMap>
+ │   ├─ Methodologie.tsx       # prose converted from methodologie_midway.html
+ │   └─ Chronologie.tsx        # timeline from chronologie.json
  ├─ components/ReplayMap/
- │   ├─ ReplayMap.tsx          # canvas (useRef) + boucle tick/draw
- │   ├─ Controls.tsx           # lecture, vitesse, zoom, cases à cocher → state React
- │   └─ render.ts              # logique de dessin portée à l'identique
- ├─ types/replay.ts            # contrat TypeScript (entities, raids, events…)
- └─ data/useReplayData.ts      # fetch + parse des JSON
+ │   ├─ ReplayMap.tsx          # canvas (useRef) + tick/draw loop
+ │   ├─ Controls.tsx           # play, speed, zoom, checkboxes → React state
+ │   └─ render.ts              # drawing logic ported identically
+ ├─ types/replay.ts            # TypeScript contract (entities, raids, events…)
+ └─ data/useReplayData.ts      # fetch + parse JSON
 ```
 
-## Composant ReplayMap (portage iso-fonctionnel)
+## ReplayMap Component (iso-functional port)
 
-- Le `<canvas>` est référencé via `useRef`.
-- La boucle `requestAnimationFrame` (`tick`/`draw`) vit dans **un seul `useEffect`**
-  à dépendances vides, pour éviter le conflit avec le cycle de rendu React.
-- Les contrôles, aujourd'hui lus via `getElementById('cbHalo')` etc., deviennent du
-  **state React** transmis au moteur de dessin.
-- `render.ts` conserve à l'identique la projection géographique, `interp`, les halos
-  d'incertitude, les raids dénombrables et le fil d'événements. Le comportement
-  visuel doit être équivalent à l'ancien `carte_midway.html`.
+- The `<canvas>` is referenced via `useRef`.
+- The `requestAnimationFrame` loop (`tick`/`draw`) lives in **a single `useEffect`**
+  with empty dependencies, to avoid conflicts with the React render cycle.
+- Controls, previously read via `getElementById('cbHalo')` etc., become
+  **React state** passed to the drawing engine.
+- `render.ts` preserves identically the geographic projection, `interp`, uncertainty
+  halos, countable raids, and the event thread. Visual behavior must be
+  equivalent to the old `carte_midway.html`.
 
-### Contrat de données (types/replay.ts)
+### Data Contract (types/replay.ts)
 
-Le JSON `replay.json` expose des clés condensées (`t`, `crs`, `n0`, `lost`, `par`,
-`err`, `m`…). Ces formes doivent être typées explicitement en TypeScript pour
-détecter au build toute rupture entre l'exporteur Python et le moteur canvas.
-Le contrat est dérivé de la structure produite par `generer_carte.py:170-174`.
+The `replay.json` exposes condensed keys (`t`, `crs`, `n0`, `lost`, `par`,
+`err`, `m`…). These shapes must be explicitly typed in TypeScript to
+detect any breaking change between the Python exporter and the canvas engine at build time.
+The contract is derived from the structure produced by `generer_carte.py:170-174`.
 
-## Navigation & pages
+## Navigation & Pages
 
-React Router avec quatre routes :
+React Router with four routes:
 
-- `/` — Accueil (présentation du projet, contexte de la bataille, liens)
-- `/carte` — Replay animé (`<ReplayMap>`)
-- `/methodologie` — prose convertie depuis `methodologie_midway.html` (sections 1-12)
-- `/chronologie` — timeline navigable des événements
+- `/` — Home (project overview, battle context, links)
+- `/carte` — Animated replay (`<ReplayMap>`)
+- `/methodologie` — prose converted from `methodologie_midway.html` (sections 1-12)
+- `/chronologie` — navigable event timeline
 
-Menu commun dans le layout. Le thème clair/sombre actuel devient un contexte React
-global (bascule disponible sur toutes les pages).
+Shared menu in the layout. The current light/dark theme becomes a global
+React context (toggle available on all pages).
 
-## Pipeline & déploiement
+## Pipeline & Deployment
 
-`tout_regenerer.sh` est adapté : l'étape « carte » (`generer_carte.py`) est
-remplacée/complétée par `export_data.py` (génère les JSON dans
-`web/public/data/`), puis `npm run build` (dans `web/`) produit le site statique.
+`tout_regenerer.sh` is updated: the "map" step (`generer_carte.py`) is
+replaced/supplemented by `export_data.py` (generates JSON into
+`web/public/data/`), then `npm run build` (inside `web/`) produces the static site.
 
-Pendant toute la migration, l'ancien `carte_midway.html` reste la référence
-fonctionnelle jusqu'à validation de l'équivalence du replay React.
+Throughout the migration, the old `carte_midway.html` remains the functional
+reference until the React replay equivalence is validated.
 
-Déploiement : site statique (les JSON sont des assets servis comme le reste).
+Deployment: static site (JSON files are served as assets like everything else).
 
-## Hors périmètre (YAGNI)
+## Out of Scope (YAGNI)
 
-- Pas d'API backend ni de base serveur.
-- Pas d'édition / écriture des données depuis le site.
-- Pas de `sql.js` / SQLite WASM en navigateur.
-- Pas de refonte de l'UI du replay (iso-fonctionnel d'abord).
-- Pas de responsive mobile poussé pour la V1.
+- No backend API or server-side database.
+- No editing / writing data from the site.
+- No `sql.js` / SQLite WASM in the browser.
+- No redesign of the replay UI (iso-functional first).
+- No heavy mobile responsive design for V1.
 
-## Critères de succès
+## Success Criteria
 
-1. Le site React se lance (`npm run dev`) et se build (`npm run build`) en statique.
-2. Les quatre pages sont navigables via un menu commun.
-3. La page Carte reproduit le comportement du `carte_midway.html` actuel
-   (rendu et contrôles équivalents).
-4. Aucune donnée n'est inline dans le HTML : tout provient des JSON exportés.
-5. `export_data.py` régénère les JSON depuis la base ; le tampon `db_hash` est
-   présent dans `meta.json`.
-6. `tout_regenerer.sh` enchaîne rebuild base → export JSON → build React.
+1. The React site starts (`npm run dev`) and builds (`npm run build`) as a static site.
+2. All four pages are navigable via a shared menu.
+3. The Map page reproduces the behavior of the current `carte_midway.html`
+   (equivalent rendering and controls).
+4. No data is inline in the HTML: everything comes from the exported JSON files.
+5. `export_data.py` regenerates the JSON from the database; the `db_hash` stamp is
+   present in `meta.json`.
+6. `tout_regenerer.sh` chains database rebuild → JSON export → React build.
