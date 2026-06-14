@@ -147,6 +147,37 @@ for r in raids:
     r['par'] = sum(1 for o in raids if o['mid'] == r['mid']
                    and o['t0'] < r['t1'] and o['t1'] > r['t0'])
 
+# --- Ordre de bataille (combattants notables) + état horodaté ---
+# Inclut tout capital ship/croiseur + tout navire ayant subi une avarie.
+# L'état à l'instant T se calcule côté React à partir de sunk/fires/hits.
+TYPE_RANK = {'base': 0, 'CV': 1, 'CVL': 2, 'BB': 3, 'CA': 4, 'CL': 5,
+             'DD': 6, 'SS': 7, 'AO': 8, 'AV': 9, 'AP': 10}
+hits_by = {}
+for r in con.execute("""
+    SELECT ep.entity_id ent, e.ts FROM events e
+    JOIN event_participants ep ON ep.event_id=e.event_id
+    WHERE ep.entity_table='ships' AND (
+        (ep.role='target' AND e.event_type IN ('hit','collision','sinking','scuttling'))
+        OR (ep.role='actor' AND e.event_type='collision'))
+    ORDER BY e.ts"""):
+    hits_by.setdefault(r['ent'], []).append(tmin(r['ts']))
+damaged = set(hits_by) | {w['ent'] for w in wrecks} | {f['ent'] for f in fires}
+
+roster = []
+for s in con.execute("SELECT ship_id, name, side, ship_type, class, fate FROM ships"):
+    sid = s['ship_id']
+    if s['ship_type'] not in ('CV', 'CVL', 'BB', 'CA', 'CL', 'base') and sid not in damaged:
+        continue
+    wk = next((w for w in wrecks if w['ent'] == sid), None)
+    roster.append({
+        'id': sid, 'name': s['name'], 'side': s['side'], 'type': s['ship_type'],
+        'cls': s['class'], 'fate': s['fate'], 'photo': f'{sid}.jpg',
+        'sunk': wk['t'] if wk else None,
+        'fires': [[f['t0'], f['t1']] for f in fires if f['ent'] == sid],
+        'hits': sorted(hits_by.get(sid, [])),
+    })
+roster.sort(key=lambda r: (r['side'], TYPE_RANK.get(r['type'], 99), r['name']))
+
 # --- Événements / contacts ---
 events = [{'t': tmin(r['ts']), 'type': r['event_type'], 'side': r['side'] or '',
            's': r['summary'], 'u': r['time_uncertainty_min'] or 0}
@@ -167,7 +198,7 @@ build = {
               if con.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='position_inferences'").fetchone()[0] else 0),
 }
 data = {'entities': entities, 'wrecks': wrecks, 'fires': fires, 'combats': combats,
-        'spots': spots, 'raids': raids, 'events': events, 'contacts': contacts,
+        'spots': spots, 'raids': raids, 'events': events, 'contacts': contacts, 'roster': roster,
         'tmax': max(e['t'] for e in events) + 120,
         'tmin': min([e['t'] for e in events] + [p['t'] for en in entities for p in en['track']]) - 30,
         'build': build}

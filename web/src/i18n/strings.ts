@@ -32,6 +32,15 @@ export const STRINGS = {
     cb_raids: 'raids',
     cb_perceived: 'perceived world',
     cb_chronology: 'chronology',
+    cb_roster: 'fleets',
+
+    roster_ijn: 'Japanese fleet',
+    roster_usn: 'US fleet',
+    roster_sunk: 'sunk',
+    roster_fire: 'on fire',
+    roster_hit: 'hit',
+    roster_ok: 'operational',
+    roster_credit: 'Photos: Wikimedia Commons (public domain)',
 
     legend_show: 'ℹ legend',
     legend_show_title: 'show legend',
@@ -70,6 +79,15 @@ export const STRINGS = {
     cb_raids: 'raids',
     cb_perceived: 'monde perçu',
     cb_chronology: 'chronologie',
+    cb_roster: 'flottes',
+
+    roster_ijn: 'Flotte japonaise',
+    roster_usn: 'Flotte américaine',
+    roster_sunk: 'coulé',
+    roster_fire: 'en feu',
+    roster_hit: 'touché',
+    roster_ok: 'opérationnel',
+    roster_credit: 'Photos : Wikimedia Commons (domaine public)',
 
     legend_show: 'ℹ légende',
     legend_show_title: 'afficher la légende',

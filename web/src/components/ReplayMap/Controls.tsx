@@ -22,6 +22,7 @@ export default function Controls({ c, set, clock, onSeek, tmin, tmax, T }: {
       <label><input type="checkbox" checked={c.showRaid} onChange={(e) => set({ showRaid: e.target.checked })} /> {t('cb_raids')}</label>
       <label><input type="checkbox" checked={c.showPercu} onChange={(e) => set({ showPercu: e.target.checked })} /> {t('cb_perceived')}</label>
       <label><input type="checkbox" checked={c.showFeed} onChange={(e) => set({ showFeed: e.target.checked })} /> {t('cb_chronology')}</label>
+      <label><input type="checkbox" checked={c.showRoster} onChange={(e) => set({ showRoster: e.target.checked })} /> {t('cb_roster')}</label>
     </div>
   );
 }

@@ -15,8 +15,12 @@ export interface Raid {
 export interface GameEvent { t: number; type: string; side: string; s: string; u: number; }
 export interface Contact { t: number; lat: number; lon: number; s: string; }
 export interface Build { gen: string; db_hash: string; n_ev: number; n_pos: number; n_inf: number; }
+export interface RosterShip {
+  id: string; name: string; side: 'IJN' | 'USN'; type: string; cls: string | null;
+  fate: string; photo: string; sunk: number | null; fires: [number, number][]; hits: number[];
+}
 export interface ReplayData {
   entities: Entity[]; wrecks: Wreck[]; fires: Fire[]; combats: Combat[];
-  spots: Spot[]; raids: Raid[]; events: GameEvent[]; contacts: Contact[];
+  spots: Spot[]; raids: Raid[]; events: GameEvent[]; contacts: Contact[]; roster: RosterShip[];
   tmin: number; tmax: number; build: Build;
 }

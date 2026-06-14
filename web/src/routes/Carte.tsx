@@ -7,12 +7,13 @@ import ReplayMap, { type ReplayControls } from '../components/ReplayMap/ReplayMa
 import Controls from '../components/ReplayMap/Controls';
 import Legend from '../components/ReplayMap/Legend';
 import Feed from '../components/ReplayMap/Feed';
+import Roster from '../components/ReplayMap/Roster';
 
 export default function Carte() {
   const { data, error } = useReplayData();
   const { theme } = useTheme();
   const { lang, t } = useLang();
-  const [c, setC] = useState<ReplayControls>({ playing: false, speedExp: 2.778, scale: 1, showHalo: true, showTrail: true, showRaid: true, showPercu: false, showFeed: false, theme });
+  const [c, setC] = useState<ReplayControls>({ playing: false, speedExp: 2.778, scale: 1, showHalo: true, showTrail: true, showRaid: true, showPercu: false, showFeed: false, showRoster: false, theme });
   const [T, setT] = useState(0);
   const seekRef = useRef<((t: number) => void) | null>(null);
   const set = (p: Partial<ReplayControls>) => setC((s) => ({ ...s, ...p }));
@@ -32,6 +33,7 @@ export default function Carte() {
           <Legend />
         </div>
         {controls.showFeed && <Feed events={data.events} T={T} onSeek={onSeek} />}
+        {controls.showRoster && <Roster roster={data.roster} T={T} onSeek={onSeek} />}
       </div>
     </div>
   );

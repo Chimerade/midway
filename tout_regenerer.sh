@@ -28,6 +28,7 @@ python3 verif_textes.py "$TMP" | head -3          && echo "[5/6] vérif textes v
 cp "$TMP" midway.sqlite
 cp "$(dirname "$TMP")/rapport_f1.md" . 2>/dev/null || true
 python3 generer_carte.py midway.sqlite carte_midway.html && echo "[5/6] carte régénérée"
+python3 data/fetch_ship_photos.py || echo "[i] photos navires: fetch ignoré (déjà présentes ou réseau indisponible)"
 python3 data/export_data.py midway.sqlite web/public/data && echo "[6/6] JSON exportés vers web/"
 ( cd web && npm run build ) && echo "[7/7] site React buildé (web/dist)"
 echo "Terminé. Tampon de la carte = empreinte de la base finale."
