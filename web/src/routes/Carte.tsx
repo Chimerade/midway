@@ -3,6 +3,8 @@ import { useReplayData } from '../data/useReplayData';
 import { useTheme } from '../theme/ThemeContext';
 import ReplayMap, { type ReplayControls } from '../components/ReplayMap/ReplayMap';
 import Controls from '../components/ReplayMap/Controls';
+import Legend from '../components/ReplayMap/Legend';
+import Feed from '../components/ReplayMap/Feed';
 
 function fmt(t: number) {
   t = Math.floor(t);
@@ -14,7 +16,7 @@ function fmt(t: number) {
 export default function Carte() {
   const { data, error } = useReplayData();
   const { theme } = useTheme();
-  const [c, setC] = useState<ReplayControls>({ playing: false, speedExp: 2.778, scale: 1, showHalo: true, showTrail: true, showRaid: true, showPercu: false, theme });
+  const [c, setC] = useState<ReplayControls>({ playing: false, speedExp: 2.778, scale: 1, showHalo: true, showTrail: true, showRaid: true, showPercu: false, showFeed: false, theme });
   const [T, setT] = useState(0);
   const seekRef = useRef<((t: number) => void) | null>(null);
   const set = (p: Partial<ReplayControls>) => setC((s) => ({ ...s, ...p }));
@@ -28,8 +30,12 @@ export default function Carte() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 46px)' }}>
       <Controls c={controls} set={set} clock={fmt(T)} T={T} tmin={data.tmin} tmax={data.tmax} onSeek={onSeek} />
-      <div style={{ flex: 1, position: 'relative' }}>
-        <ReplayMap data={data} controls={controls} seekRef={seekRef} onClock={setT} onScaleChange={onScaleChange} />
+      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+        <div style={{ flex: 1, position: 'relative' }}>
+          <ReplayMap data={data} controls={controls} seekRef={seekRef} onClock={setT} onScaleChange={onScaleChange} />
+          <Legend />
+        </div>
+        {controls.showFeed && <Feed events={data.events} T={T} onSeek={onSeek} />}
       </div>
     </div>
   );

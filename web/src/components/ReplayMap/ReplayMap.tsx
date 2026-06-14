@@ -6,6 +6,7 @@ import { draw } from './render';
 export interface ReplayControls {
   playing: boolean; speedExp: number; scale: number;
   showHalo: boolean; showTrail: boolean; showRaid: boolean; showPercu: boolean;
+  showFeed: boolean;
   theme: 'light' | 'dark';
 }
 

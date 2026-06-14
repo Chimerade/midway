@@ -19,6 +19,7 @@ export default function Controls({ c, set, clock, onSeek, tmin, tmax, T }: {
       <label><input type="checkbox" checked={c.showTrail} onChange={(e) => set({ showTrail: e.target.checked })} /> traînées</label>
       <label><input type="checkbox" checked={c.showRaid} onChange={(e) => set({ showRaid: e.target.checked })} /> raids</label>
       <label><input type="checkbox" checked={c.showPercu} onChange={(e) => set({ showPercu: e.target.checked })} /> monde perçu</label>
+      <label><input type="checkbox" checked={c.showFeed} onChange={(e) => set({ showFeed: e.target.checked })} /> chronologie</label>
     </div>
   );
 }
