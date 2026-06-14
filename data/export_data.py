@@ -183,15 +183,20 @@ write('meta.json', build)                  # `build` vient de generer_carte.py:1
 
 con.close()
 
-# Méthodologie : extraire le contenu du <body> (sans <nav>/<script>) en asset HTML
-src = open(os.path.join(ROOT, 'methodologie_midway.html'), encoding='utf-8').read()
-m = re.search(r'<body[^>]*>(.*)</body>', src, re.S)
-if not m:
-    raise SystemExit("export_data: impossible d'extraire le <body> de methodologie_midway.html")
-body = m.group(1)
-body = re.sub(r'<nav>.*?</nav>', '', body, flags=re.S)
-body = re.sub(r'<script.*?</script>', '', body, flags=re.S)
-with open(os.path.join(OUT, 'methodologie.html'), 'w', encoding='utf-8') as f:
-    f.write(body.strip())
+# Méthodologie : extraire le contenu du <body> (sans <nav>/<script>) en asset HTML,
+# pour chaque langue disponible -> methodologie.<lang>.html
+def export_methodologie(src_name, out_name):
+    path = os.path.join(ROOT, src_name)
+    src = open(path, encoding='utf-8').read()
+    m = re.search(r'<body[^>]*>(.*)</body>', src, re.S)
+    if not m:
+        raise SystemExit(f"export_data: impossible d'extraire le <body> de {src_name}")
+    body = re.sub(r'<nav>.*?</nav>', '', m.group(1), flags=re.S)
+    body = re.sub(r'<script.*?</script>', '', body, flags=re.S)
+    with open(os.path.join(OUT, out_name), 'w', encoding='utf-8') as f:
+        f.write(body.strip())
+
+export_methodologie('methodologie_midway.html', 'methodologie.fr.html')
+export_methodologie('methodologie_midway.en.html', 'methodologie.en.html')
 
 print(f"OK: {OUT} (entites={len(entities)}, events={len(events)})")

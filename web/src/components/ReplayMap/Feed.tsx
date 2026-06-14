@@ -1,21 +1,16 @@
 import { useEffect, useRef } from 'react';
 import type { GameEvent } from '../../types/replay';
+import { useLang } from '../../i18n/LanguageContext';
+import { fmtFeed } from '../../i18n/dates';
 
-// Étiquette temporelle d'un événement: "HH:MM J{jour}" (GMT−12), comme l'ancien fil.
-function fmtFeed(t: number): string {
-  const d = 3 + Math.floor(t / 1440);
-  const mins = ((t % 1440) + 1440) % 1440;
-  const h = Math.floor(mins / 60), m = mins % 60;
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(h)}:${p(m)} J${d}`;
-}
-
-// Fil d'événements optionnel sur la carte: cliquer un événement saute à son instant.
-// Reprend le comportement de l'ancien #feed (événement courant surligné, auto-scroll).
+// Optional event feed on the map: clicking an event seeks to that moment.
+// Mirrors the old #feed (current event highlighted, auto-scrolled).
 export default function Feed({ events, T, onSeek }: {
   events: GameEvent[]; T: number; onSeek: (t: number) => void;
 }) {
-  // événement courant = dernier événement passé (ou tout proche)
+  const { lang, t } = useLang();
+
+  // current event = last event already passed (or very close)
   let cur = -1;
   for (let i = 0; i < events.length; i++) {
     if (events[i].t <= T + 1) cur = i; else break;
@@ -41,10 +36,10 @@ export default function Feed({ events, T, onSeek }: {
             key={i}
             ref={i === cur ? curRef : undefined}
             className={cls}
-            title="cliquer: aller à cet instant"
+            title={t('feed_click_title')}
             onClick={() => onSeek(e.t)}
           >
-            <span className="t">{fmtFeed(e.t)}</span>
+            <span className="t">{fmtFeed(e.t, lang)}</span>
             {e.u ? ` ±${e.u}'` : ''} — {e.s}
           </div>
         );

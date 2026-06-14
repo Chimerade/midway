@@ -36,11 +36,13 @@ def main():
     meta = json.load(open(os.path.join(out, 'meta.json')))
     assert meta['db_hash'] == replay['build']['db_hash'], "db_hash incoherent entre meta et replay"
 
-    assert os.path.exists(os.path.join(out, 'methodologie.html')), "methodologie.html absent"
-    meth = open(os.path.join(out, 'methodologie.html'), encoding='utf-8').read()
-    assert meth.strip(), "methodologie.html vide"
-    assert 'Principes directeurs' in meth, "methodologie.html: contenu attendu absent"
-    assert '<nav>' not in meth and '<script' not in meth, "methodologie.html: nav/script non strippes"
+    # méthodologie bilingue: un asset par langue
+    meth_fr = open(os.path.join(out, 'methodologie.fr.html'), encoding='utf-8').read()
+    assert 'Principes directeurs' in meth_fr, "methodologie.fr.html: contenu attendu absent"
+    assert '<nav>' not in meth_fr and '<script' not in meth_fr, "methodologie.fr.html: nav/script non strippes"
+    meth_en = open(os.path.join(out, 'methodologie.en.html'), encoding='utf-8').read()
+    assert meth_en.strip(), "methodologie.en.html vide"
+    assert '<nav>' not in meth_en and '<script' not in meth_en, "methodologie.en.html: nav/script non strippes"
     print("OK")
 
 if __name__ == '__main__':
