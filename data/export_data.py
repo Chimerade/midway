@@ -147,6 +147,91 @@ for r in raids:
     r['par'] = sum(1 for o in raids if o['mid'] == r['mid']
                    and o['t0'] < r['t1'] and o['t1'] > r['t0'])
 
+# --- Détail des missions pour l'encart au clic (nom, avions, provenance) ---
+raid_mids = {r['mid'] for r in raids}
+missions = {}
+for r in con.execute("""
+    SELECT m.mission_id, m.mission_type, m.target_desc, osh.name AS origin_name
+    FROM missions m LEFT JOIN ships osh ON osh.ship_id = m.origin_ship_id"""):
+    if r['mission_id'] not in raid_mids:
+        continue
+    mi = minfo.get(r['mission_id'])
+    missions[r['mission_id']] = {
+        'type': r['mission_type'] or '', 'target': r['target_desc'] or '',
+        'origin': r['origin_name'] or '', 'aircraft': [],
+        'committed': mi['n0'] if mi else 0, 'lost': mi['lost'] if mi else 0}
+# avions engagés, regroupés par type d'appareil (le plus nombreux d'abord)
+for r in con.execute("""
+    SELECT ms.mission_id, at.designation ac, SUM(ms.aircraft_committed) n
+    FROM mission_squadrons ms JOIN squadrons s ON s.squadron_id = ms.squadron_id
+    LEFT JOIN aircraft_types at ON at.type_id = s.type_id
+    GROUP BY ms.mission_id, at.designation ORDER BY n DESC"""):
+    m = missions.get(r['mission_id'])
+    if m and r['ac']:
+        m['aircraft'].append({'n': r['n'] or 0, 'type': r['ac']})
+# provenance de repli: navires-mères des escadrons (recherches sans origin_ship)
+for r in con.execute("""
+    SELECT ms.mission_id, GROUP_CONCAT(DISTINCT sh.name) ships
+    FROM mission_squadrons ms JOIN squadrons s ON s.squadron_id = ms.squadron_id
+    LEFT JOIN ships sh ON sh.ship_id = s.ship_id GROUP BY ms.mission_id"""):
+    m = missions.get(r['mission_id'])
+    if m and not m['origin'] and r['ships']:
+        m['origin'] = r['ships']
+
+# --- Synchronisation auto raid ↔ cible mobile ---
+# Le point d'attaque d'un raid colle à la position interpolée de sa cible (KB,
+# porte-avions…) à l'instant de la frappe. Robuste : toute retouche de la piste
+# de la cible re-aligne les frappes sans édition manuelle. Si l'attaque tombe en
+# milieu de segment, on scinde le segment pour que la formation passe par la cible.
+ENT_TRACK = {e['id']: sorted(e['track'], key=lambda p: p['t']) for e in entities}
+TARGET_ENTITY = [
+    (re.compile(r'kid[oō] butai', re.I), 'KIDO-BUTAI'),
+    (re.compile(r'yorktown', re.I), 'SH-CV5'),
+    (re.compile(r'hiry', re.I), 'SH-HIRYU'),
+    (re.compile(r'mogami|mikuma', re.I), 'CRUDIV7'),
+    (re.compile(r'transport|convoi', re.I), 'TRANSPORT-GROUP'),
+]
+def _interp(track, t):
+    if not track: return None
+    if t <= track[0]['t']: return [track[0]['lat'], track[0]['lon']]
+    if t >= track[-1]['t']: return [track[-1]['lat'], track[-1]['lon']]
+    for i in range(len(track) - 1):
+        a, b = track[i], track[i + 1]
+        if a['t'] <= t <= b['t']:
+            f = (t - a['t']) / (b['t'] - a['t']) if b['t'] != a['t'] else 0
+            return [round(a['lat'] + f * (b['lat'] - a['lat']), 3),
+                    round(a['lon'] + f * (b['lon'] - a['lon']), 3)]
+    return None
+def _target(desc):
+    for rx, eid in TARGET_ENTITY:
+        if desc and rx.search(desc) and eid in ENT_TRACK:
+            return eid
+    return None
+
+EPS = 0.5  # minutes
+extra_legs = []
+for r in raids:
+    if r['ta'] is None:
+        continue
+    tid = _target(missions.get(r['mid'], {}).get('target', ''))
+    if not tid:
+        continue
+    tp = _interp(ENT_TRACK[tid], r['ta'])
+    if not tp:
+        continue
+    ta = r['ta']
+    if abs(r['t1'] - ta) <= EPS: r['b'] = tp   # segment d'approche → finit sur la cible
+    if abs(r['t0'] - ta) <= EPS: r['a'] = tp   # segment de retour → part de la cible
+    if r['t0'] + EPS < ta < r['t1'] - EPS:     # attaque en milieu de segment → scinder
+        tail = dict(r); tail['t0'] = ta; tail['a'] = tp
+        r['t1'] = ta; r['b'] = tp
+        extra_legs.append(tail)
+raids.extend(extra_legs)
+# recalcul des éventails (par) après d'éventuelles scissions
+for r in raids:
+    r['par'] = sum(1 for o in raids if o['mid'] == r['mid']
+                   and o['t0'] < r['t1'] and o['t1'] > r['t0'])
+
 # --- Ordre de bataille (combattants notables) + état horodaté ---
 # Inclut tout capital ship/croiseur + tout navire ayant subi une avarie.
 # L'état à l'instant T se calcule côté React à partir de sunk/fires/hits.
@@ -198,7 +283,7 @@ build = {
               if con.execute("SELECT COUNT(*) FROM sqlite_master WHERE name='position_inferences'").fetchone()[0] else 0),
 }
 data = {'entities': entities, 'wrecks': wrecks, 'fires': fires, 'combats': combats,
-        'spots': spots, 'raids': raids, 'events': events, 'contacts': contacts, 'roster': roster,
+        'spots': spots, 'raids': raids, 'missions': missions, 'events': events, 'contacts': contacts, 'roster': roster,
         'tmax': max(e['t'] for e in events) + 120,
         'tmin': min([e['t'] for e in events] + [p['t'] for en in entities for p in en['track']]) - 30,
         'build': build}

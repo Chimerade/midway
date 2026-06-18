@@ -1,5 +1,6 @@
 import type { ReplayData } from '../../types/replay';
 import type { RenderState, Clickable, DrawResult, DrawFn } from './types';
+import { raidPhaseKey, PHASE_LABEL } from './phase';
 
 export const LAT0 = 28.21, LON0 = -177.37, RAD = Math.PI / 180;
 
@@ -183,11 +184,11 @@ export const draw: DrawFn = (ctx, cv, data, st): DrawResult => {
       ctx.setLineDash([4, 4]); ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(sx, sy); ctx.stroke(); ctx.setLineDash([]);
     }
-    if (selWp.idx < selWp.trk.length - 1) { // segment sortant (épais + flèche)
+    if (selWp.idx < selWp.trk.length - 1) { // segment sortant (épais, s'arrête à la flèche)
       const b = selWp.trk[selWp.idx + 1], [bx2, by2] = proj(b.lat, b.lon, cv, st);
-      ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(bx2, by2); ctx.stroke();
       const ang = Math.atan2(by2 - sy, bx2 - sx), mxp = (sx + bx2) / 2, myp = (sy + by2) / 2;
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(mxp, myp); ctx.stroke();
       ctx.fillStyle = '#ff7a00';
       ctx.save(); ctx.translate(mxp, myp); ctx.rotate(ang);
       ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(-5, -5); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fill(); ctx.restore();
@@ -231,6 +232,7 @@ export const draw: DrawFn = (ctx, cv, data, st): DrawResult => {
         const f = launching ? 0 : (st.T - r.t0) / (r.t1 - r.t0);
         const lat = r.a[0] + f * (r.b[0] - r.a[0]), lon = unwrap(r.a[1]) + f * (unwrap(r.b[1]) - unwrap(r.a[1]));
         const [x, y] = proj(lat, lon, cv, st); const c = colors[r.side];
+        clickables.push({ x, y, ent: r.mid, pt: null, trk: [], idx: -1, mid: r.mid });
         ctx.strokeStyle = c; ctx.globalAlpha = .4;
         const [xa, ya] = proj(r.a[0], r.a[1], cv, st); ctx.setLineDash([2, 3]);
         ctx.beginPath(); ctx.moveTo(xa, ya); ctx.lineTo(x, y); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
@@ -273,6 +275,9 @@ export const draw: DrawFn = (ctx, cv, data, st): DrawResult => {
         }
         ctx.font = '9px Verdana'; ctx.fillStyle = P.sub;
         ctx.fillText(r.mid.replace(/MS-060[346]-/, ''), x + 8, y - 6);
+        // phase de vol (recherche / attaque / retour) — lève l'ambiguïté du survol sans frappe
+        const phase = PHASE_LABEL[st.lang][raidPhaseKey(r.ta, st.T)];
+        ctx.fillStyle = c; ctx.fillText(phase, x + 8, y + 20);
         ctx.font = '12px Verdana';
       }
     });
