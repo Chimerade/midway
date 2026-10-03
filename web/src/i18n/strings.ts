@@ -33,6 +33,8 @@ export const STRINGS = {
     cb_perceived: 'perceived world',
     cb_chronology: 'chronology',
     cb_roster: 'fleets',
+    cb_clouds: 'clouds',
+    cb_follow: 'follow the action',
 
     roster_ijn: 'Japanese fleet',
     roster_usn: 'US fleet',
@@ -94,6 +96,8 @@ export const STRINGS = {
     cb_perceived: 'monde perçu',
     cb_chronology: 'chronologie',
     cb_roster: 'flottes',
+    cb_clouds: 'nuages',
+    cb_follow: "suivre l'action",
 
     roster_ijn: 'Flotte japonaise',
     roster_usn: 'Flotte américaine',

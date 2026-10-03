@@ -21,6 +21,8 @@ export default function Controls({ c, set, clock, onSeek, tmin, tmax, T }: {
       <label><input type="checkbox" checked={c.showTrail} onChange={(e) => set({ showTrail: e.target.checked })} /> {t('cb_trails')}</label>
       <label><input type="checkbox" checked={c.showRaid} onChange={(e) => set({ showRaid: e.target.checked })} /> {t('cb_raids')}</label>
       <label><input type="checkbox" checked={c.showPercu} onChange={(e) => set({ showPercu: e.target.checked })} /> {t('cb_perceived')}</label>
+      <label><input type="checkbox" checked={c.showClouds} onChange={(e) => set({ showClouds: e.target.checked })} /> {t('cb_clouds')}</label>
+      <label><input type="checkbox" checked={c.follow} onChange={(e) => set({ follow: e.target.checked })} /> {t('cb_follow')}</label>
       <label><input type="checkbox" checked={c.showFeed} onChange={(e) => set({ showFeed: e.target.checked })} /> {t('cb_chronology')}</label>
       <label><input type="checkbox" checked={c.showRoster} onChange={(e) => set({ showRoster: e.target.checked })} /> {t('cb_roster')}</label>
     </div>

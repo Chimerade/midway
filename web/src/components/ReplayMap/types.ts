@@ -1,4 +1,4 @@
-import type { ReplayData } from '../../types/replay';
+import type { ReplayData, TrackPoint } from '../../types/replay';
 import type { Lang } from '../../i18n/strings';
 
 export interface RenderState {
@@ -8,10 +8,12 @@ export interface RenderState {
   theme: 'light' | 'dark';
   lang: Lang;
   showHalo: boolean; showTrail: boolean; showRaid: boolean; showPercu: boolean;
-  selWp: { pt: any; trk: any[]; idx: number } | null;
+  showClouds?: boolean;  // couche nuageuse (nébulosité observée)
+  reduced?: boolean;     // préférence système « réduire les animations »
+  selWp: { pt: TrackPoint; trk: TrackPoint[]; idx: number } | null;
 }
 
-export interface Clickable { x: number; y: number; ent: string; pt: any; trk: any[]; idx: number; mid?: string; }
+export interface Clickable { x: number; y: number; ent: string; pt: TrackPoint | null; trk: TrackPoint[]; idx: number; mid?: string; }
 
 export type DrawResult = { clickables: Clickable[] };
 export type DrawFn = (ctx: CanvasRenderingContext2D, cv: HTMLCanvasElement, data: ReplayData, st: RenderState) => DrawResult;

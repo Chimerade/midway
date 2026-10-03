@@ -14,7 +14,7 @@ export default function Carte() {
   const { data, error } = useReplayData();
   const { theme } = useTheme();
   const { lang, t } = useLang();
-  const [c, setC] = useState<ReplayControls>({ playing: false, speedExp: 2.778, scale: 2, showHalo: true, showTrail: true, showRaid: true, showPercu: false, showFeed: false, showRoster: false, theme, lang });
+  const [c, setC] = useState<ReplayControls>({ playing: false, speedExp: 2.778, scale: 2, showHalo: true, showTrail: true, showRaid: true, showPercu: false, showFeed: false, showRoster: false, showClouds: true, follow: false, theme, lang });
   const [T, setT] = useState(0);
   const [selRaid, setSelRaid] = useState<string | null>(null);
   const seekRef = useRef<((t: number) => void) | null>(null);
@@ -22,6 +22,7 @@ export default function Carte() {
   const onScaleChange = useCallback((update: (prev: number) => number) => setC((prev) => ({ ...prev, scale: update(prev.scale) })), []);
   const onSelectRaid = useCallback((mid: string | null) => setSelRaid(mid), []);
   const onSeek = useCallback((t: number) => { seekRef.current?.(t); setT(t); }, []);
+  const onFollowChange = useCallback((follow: boolean) => setC((prev) => ({ ...prev, follow })), []);
 
   if (error) return <div className="page">{t('load_error')} : {error}</div>;
   if (!data) return <div className="page">{t('loading')}</div>;
@@ -32,7 +33,7 @@ export default function Carte() {
       <Controls c={controls} set={set} clock={fmtFull(T, lang)} T={T} tmin={data.tmin} tmax={data.tmax} onSeek={onSeek} />
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <div style={{ flex: 1, position: 'relative' }}>
-          <ReplayMap data={data} controls={controls} seekRef={seekRef} onClock={setT} onScaleChange={onScaleChange} onSelectRaid={onSelectRaid} />
+          <ReplayMap data={data} controls={controls} seekRef={seekRef} onClock={setT} onScaleChange={onScaleChange} onSelectRaid={onSelectRaid} onFollowChange={onFollowChange} />
           <Legend />
           {selRaid && data.missions[selRaid] && (() => {
             const raid = data.raids.find((r) => r.mid === selRaid);

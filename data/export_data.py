@@ -18,13 +18,26 @@ con = sqlite3.connect(f'file:{DB}?mode=ro&immutable=1', uri=True)
 con.row_factory = sqlite3.Row
 
 # --- Composition des formations (étiquettes lisibles) ---
-def formation_sub(fid):
+def formation_tree(fid):
     fids, frontier = {fid}, [fid]
     while frontier:
         kids = [r['formation_id'] for r in con.execute(
             f"SELECT formation_id FROM formations WHERE parent_formation_id IN ({','.join('?'*len(frontier))})", frontier)]
         frontier = [k for k in kids if k not in fids]; fids.update(frontier)
-    ph = ','.join('?' * len(fids)); fl = list(fids)
+    return list(fids)
+
+# Navires d'une formation (sous-formations comprises), porte-avions d'abord : la carte
+# dessine chaque bâtiment et retire ceux qui se détachent (piste propre) ou qui coulent.
+MEMBER_RANK = {'CV': 0, 'CVL': 1, 'BB': 2, 'CA': 3, 'CL': 4, 'DD': 5}
+def formation_members(fid):
+    fl = formation_tree(fid)
+    rows = con.execute(f"SELECT ship_id, ship_type FROM ships WHERE formation_id IN ({','.join('?'*len(fl))})"
+                       " AND ship_type != 'base'", fl).fetchall()
+    return [{'id': r['ship_id'], 'type': r['ship_type']}
+            for r in sorted(rows, key=lambda r: (MEMBER_RANK.get(r['ship_type'], 9), r['ship_id']))]
+
+def formation_sub(fid):
+    fl = formation_tree(fid); ph = ','.join('?' * len(fl))
     cdr = con.execute("""SELECT p.name FROM formations f LEFT JOIN persons p
                          ON p.person_id=f.commander_id WHERE f.formation_id=?""", (fid,)).fetchone()
     cvs = [r['name'].replace('USS ', '') for r in con.execute(
@@ -55,17 +68,21 @@ TRACKED = [
 entities = []
 for table, eid, label, side, sub in TRACKED:
     rows = con.execute(
-        """SELECT p.ts, p.lat, p.lon, p.position_error_nm, p.method, p.course_deg, p.notes,
+        """SELECT p.ts, p.lat, p.lon, p.position_error_nm, p.method, p.course_deg, p.speed_kn, p.notes,
                   p.cause_event_id, e.event_type cause_type, e.summary cause_summary
            FROM positions p LEFT JOIN events e ON e.event_id=p.cause_event_id
            WHERE p.entity_table=? AND p.entity_id=? ORDER BY p.ts""", (table, eid)).fetchall()
     if rows:
+        ship = con.execute("SELECT ship_type FROM ships WHERE ship_id=?", (eid,)).fetchone() if table == 'ships' else None
         entities.append({
             'id': eid, 'label': label, 'side': side,
             'sub': sub if sub else (formation_sub(eid) if table == 'formations' else ''),
+            'kind': 'formation' if table == 'formations' else 'ship',
+            'type': ship['ship_type'] if ship else None,
+            'ships': formation_members(eid) if table == 'formations' else [],
             'track': [{'t': tmin(r['ts']), 'lat': r['lat'], 'lon': r['lon'],
                        'err': r['position_error_nm'] or 25, 'm': r['method'],
-                       'crs': r['course_deg'], 'ts': r['ts'][5:16],
+                       'crs': r['course_deg'], 'spd': r['speed_kn'], 'ts': r['ts'][5:16],
                        'cause': (f"[{r['cause_type']}] {r['cause_summary']}" if r['cause_event_id'] else None),
                        'note': r['notes']} for r in rows]})
 
@@ -80,19 +97,22 @@ for sid, name in [('SH-KAGA','Kaga'),('SH-SORYU','Sōryū'),('SH-AKAGI','Akagi')
 # --- Navires en feu/stoppés: intervalles depuis la séquence d'avaries
 #     (ouvert sur flight_ops='impossible', refermé sur 'degraded'/'normal',
 #      clôture finale au naufrage) ---
+#     burn: incendie (bombes, feu) ou simple désemparement (torpilles seules : le
+#     Yorktown du 4 après 14:45 gîte, sans énergie, mais ne brûle pas)
+BURN = re.compile(r'bomb|incendi|feu|flamm', re.I)
 fires = []
 for sid in ('SH-KAGA','SH-SORYU','SH-AKAGI','SH-HIRYU','SH-CV5','SH-MIKUMA'):
     wk = next((w for w in wrecks if w['ent'] == sid), None)
     if not wk: continue
-    open_t = None
-    for d in con.execute("SELECT ts, flight_ops FROM damage_states WHERE ship_id=? ORDER BY ts", (sid,)):
+    open_t, burn = None, False
+    for d in con.execute("SELECT ts, flight_ops, description FROM damage_states WHERE ship_id=? ORDER BY ts", (sid,)):
         if d['flight_ops'] == 'impossible' and open_t is None:
-            open_t = tmin(d['ts'])
+            open_t, burn = tmin(d['ts']), bool(BURN.search(d['description'] or ''))
         elif d['flight_ops'] in ('degraded', 'normal') and open_t is not None:
-            fires.append({'ent': sid, 't0': open_t, 't1': tmin(d['ts'])})
+            fires.append({'ent': sid, 't0': open_t, 't1': tmin(d['ts']), 'burn': burn})
             open_t = None
     if open_t is not None:
-        fires.append({'ent': sid, 't0': open_t, 't1': wk['t']})
+        fires.append({'ent': sid, 't0': open_t, 't1': wk['t'], 'burn': burn})
 
 # --- Repérages (qui voit qui): événements sighting/report avec cible ---
 spots = []
@@ -105,7 +125,7 @@ for r in con.execute("""
 # --- Combats (attaques/coups localisés sur leur cible) ---
 combats, seen = [], set()
 for r in con.execute("""
-    SELECT e.event_id, e.ts, e.time_uncertainty_min u, ep.entity_id ent, e.summary
+    SELECT e.event_id, e.ts, e.event_type k, e.time_uncertainty_min u, ep.entity_id ent, e.summary
     FROM events e JOIN event_participants ep ON ep.event_id=e.event_id AND ep.role='target'
     WHERE e.event_type IN ('attack','hit','collision') ORDER BY e.ts"""):
     key = (r['event_id'], r['ent'])
@@ -113,7 +133,7 @@ for r in con.execute("""
     seen.add(key)
     t0 = tmin(r['ts'])
     combats.append({'t0': t0 - 2, 't1': t0 + max(14, (r['u'] or 0)), 'ent': r['ent'],
-                    's': r['summary'][:60]})
+                    'k': r['k'], 's': r['summary'][:60]})
 
 # --- Raids (avec effectifs engagés/perdus pour le dénombrement au zoom) ---
 minfo = {r['mission_id']: r for r in con.execute("""
@@ -128,7 +148,7 @@ for r in con.execute("SELECT mission_id, MIN(seq) s FROM mission_legs GROUP BY m
 raids = []
 for r in con.execute("""
     SELECT l.mission_id, l.seq, l.start_ts, l.end_ts, l.start_lat, l.start_lon,
-           l.end_lat, l.end_lon, m.side
+           l.end_lat, l.end_lon, l.altitude_m, m.side
     FROM mission_legs l JOIN missions m ON m.mission_id=l.mission_id
     WHERE l.start_ts IS NOT NULL AND l.end_ts IS NOT NULL ORDER BY l.mission_id, l.seq"""):
     mi = minfo.get(r['mission_id'])
@@ -141,7 +161,8 @@ for r in con.execute("""
                   't0': tmin(r['start_ts']), 't1': tmin(r['end_ts']),
                   'a': [r['start_lat'], r['start_lon']], 'b': [r['end_lat'], r['end_lon']],
                   'n0': mi['n0'] if mi else 0, 'lost': mi['lost'] if mi else 0,
-                  'ta': tmin(mi['attack_ts']) if mi and mi['attack_ts'] else None, 'tl': tl})
+                  'ta': tmin(mi['attack_ts']) if mi and mi['attack_ts'] else None, 'tl': tl,
+                  'alt': r['altitude_m']})
 # lignes parallèles d'une même mission (éventails): l'effectif mission se RÉPARTIT
 for r in raids:
     r['par'] = sum(1 for o in raids if o['mid'] == r['mid']
@@ -258,7 +279,7 @@ for s in con.execute("SELECT ship_id, name, side, ship_type, class, fate FROM sh
         'id': sid, 'name': s['name'], 'side': s['side'], 'type': s['ship_type'],
         'cls': s['class'], 'fate': s['fate'], 'photo': f'{sid}.jpg',
         'sunk': wk['t'] if wk else None,
-        'fires': [[f['t0'], f['t1']] for f in fires if f['ent'] == sid],
+        'fires': [[f['t0'], f['t1']] for f in fires if f['ent'] == sid and f['burn']],
         'hits': sorted(hits_by.get(sid, [])),
     })
 roster.sort(key=lambda r: (r['side'], TYPE_RANK.get(r['type'], 99), r['name']))
@@ -272,6 +293,14 @@ contacts = [{'t': tmin(r['ts_sent']), 'lat': r['reported_lat'], 'lon': r['report
             for r in con.execute("SELECT ts_sent, reported_lat, reported_lon, reported_composition "
                                  "FROM contact_reports WHERE reported_lat IS NOT NULL")]
 
+# --- Météo observée : vent (dérive des fumées et des nuages) et nébulosité par zone ---
+def cover_frac(txt):
+    m = re.search(r'(\d+)(?:\s*-\s*(\d+))?\s*/\s*10', txt or '')
+    return round((int(m.group(1)) + int(m.group(2) or m.group(1))) / 20, 2) if m else None
+weather = [{'t': tmin(r['ts']), 'lat': r['lat'], 'lon': r['lon'], 'wd': r['wind_dir_deg'],
+            'ws': r['wind_speed_kn'], 'cc': cover_frac(r['cloud_cover']), 'vis': r['visibility_nm']}
+           for r in con.execute("SELECT * FROM weather_obs ORDER BY ts")]
+
 # --- Tampon de version ---
 db_path = DB[5:].split('?')[0] if DB.startswith('file:') else DB
 build = {
@@ -284,6 +313,7 @@ build = {
 }
 data = {'entities': entities, 'wrecks': wrecks, 'fires': fires, 'combats': combats,
         'spots': spots, 'raids': raids, 'missions': missions, 'events': events, 'contacts': contacts, 'roster': roster,
+        'weather': weather,
         'tmax': max(e['t'] for e in events) + 120,
         'tmin': min([e['t'] for e in events] + [p['t'] for en in entities for p in en['track']]) - 30,
         'build': build}

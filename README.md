@@ -118,7 +118,7 @@ JSON — no data is hard-coded into the HTML. The UI is bilingual
 | Page | Contents |
 |---|---|
 | Home | Overview and links. |
-| Map | Animated canvas replay: tracks, uncertainty halos, countable raids, combats, sightings. Collapsible legend and an optional event feed (click = jump to that moment). |
+| Map | Animated canvas replay with a realistic sea (real sun position, observed wind and cloud cover), ships and aircraft seen from above, wakes, smoke, flak and hits, under a tactical layer: tracks, uncertainty halos, countable raids, US radar coverage, sightings. Optional camera that follows the action, collapsible legend and event feed (click = jump to that moment). |
 | Chronology | List of events (timeline). |
 | Methodology | The modeling methodology. |
 

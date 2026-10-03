@@ -2,20 +2,22 @@ import { useEffect, useRef, type RefObject } from 'react';
 import type { ReplayData } from '../../types/replay';
 import type { Lang } from '../../i18n/strings';
 import type { RenderState, Clickable } from './types';
-import { draw } from './render';
+import { draw, pxnm, cameraTarget, LAT0, LON0, RAD, unwrap } from './render';
 
 export interface ReplayControls {
   playing: boolean; speedExp: number; scale: number;
   showHalo: boolean; showTrail: boolean; showRaid: boolean; showPercu: boolean;
   showFeed: boolean; showRoster: boolean;
+  showClouds: boolean; follow: boolean;
   theme: 'light' | 'dark'; lang: Lang;
 }
 
-export default function ReplayMap({ data, controls, seekRef, onClock, onScaleChange, onSelectRaid }: {
+export default function ReplayMap({ data, controls, seekRef, onClock, onScaleChange, onSelectRaid, onFollowChange }: {
   data: ReplayData; controls: ReplayControls;
   seekRef?: RefObject<((t: number) => void) | null>;
   onClock: (t: number) => void; onScaleChange: (update: (prev: number) => number) => void;
   onSelectRaid: (mid: string | null) => void;
+  onFollowChange?: (follow: boolean) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const selRaidRef = useRef<string | null>(null);
@@ -25,6 +27,7 @@ export default function ReplayMap({ data, controls, seekRef, onClock, onScaleCha
   });
   const ctrlRef = useRef(controls);
   const clickRef = useRef<Clickable[]>([]);
+  const dragRef = useRef(false);
 
   // Sync latest controls into the ref + expose an imperative seek for the parent's
   // time slider. Done after each render (effect) rather than during render.
@@ -36,14 +39,24 @@ export default function ReplayMap({ data, controls, seekRef, onClock, onScaleCha
   // Boucle d'animation — un seul effet, jamais recréé (cf. generer_carte.py:539-547)
   useEffect(() => {
     const cv = canvasRef.current!, ctx = cv.getContext('2d')!;
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
     let raf = 0, last = performance.now();
     const tick = () => {
-      const now = performance.now(), dt = (now - last) / 1000; last = now;
+      const now = performance.now(), dt = Math.min(0.1, (now - last) / 1000); last = now;
       const st = stRef.current, c = ctrlRef.current;
       st.scale = c.scale; st.theme = c.theme; st.lang = c.lang;
       st.showHalo = c.showHalo; st.showTrail = c.showTrail; st.showRaid = c.showRaid; st.showPercu = c.showPercu;
+      st.showClouds = c.showClouds; st.reduced = motion.matches;
       if (c.playing) st.T = Math.min(data.tmax, st.T + Math.pow(10, c.speedExp) * dt / 60);
-      cv.width = cv.parentElement!.clientWidth; cv.height = cv.parentElement!.clientHeight;
+      // caméra : glisse vers le centre de l'action (amorti exponentiel, ~0,9 s)
+      if (c.follow && !dragRef.current) {
+        const p = cameraTarget(data, st.T);
+        if (p) {
+          const tx = -(unwrap(p.lon) - LON0) * 60 * Math.cos(LAT0 * RAD), ty = -(p.lat - LAT0) * 60;
+          const a = motion.matches ? 1 : 1 - Math.exp(-dt / 0.9);
+          st.panX += (tx - st.panX) * a; st.panY += (ty - st.panY) * a;
+        }
+      }
       clickRef.current = draw(ctx, cv, data, st).clickables;
       onClock(st.T);
       raf = requestAnimationFrame(tick);
@@ -67,7 +80,7 @@ export default function ReplayMap({ data, controls, seekRef, onClock, onScaleCha
     return () => cv.removeEventListener('wheel', onWheel);
   }, [onScaleChange]);
 
-  // Pan par drag (cf. generer_carte.py:571-606)
+  // Pan par drag (cf. generer_carte.py:571-606) — reprendre la main coupe le suivi de l'action
   useEffect(() => {
     const cv = canvasRef.current!;
     let drag: [number, number] | null = null, dist = 0;
@@ -75,9 +88,13 @@ export default function ReplayMap({ data, controls, seekRef, onClock, onScaleCha
     const move = (e: MouseEvent) => {
       if (!drag) return;
       dist += Math.abs(e.clientX - drag[0]) + Math.abs(e.clientY - drag[1]);
-      const st = stRef.current, pxnm = Math.min(cv.width, cv.height) / 900;
-      st.panX += (e.clientX - drag[0]) / (st.scale * pxnm);
-      st.panY -= (e.clientY - drag[1]) / (st.scale * pxnm);
+      if (dist >= 5 && !dragRef.current) {
+        dragRef.current = true;
+        if (ctrlRef.current.follow) onFollowChange?.(false);
+      }
+      const st = stRef.current, k = st.scale * pxnm(cv);  // pixels CSS par nm
+      st.panX += (e.clientX - drag[0]) / k;
+      st.panY -= (e.clientY - drag[1]) / k;
       drag = [e.clientX, e.clientY];
     };
     const up = (e: MouseEvent) => {
@@ -93,15 +110,15 @@ export default function ReplayMap({ data, controls, seekRef, onClock, onScaleCha
         } else { // clic sur un waypoint, ou ailleurs
           const cur = stRef.current.selWp;
           const same = b && cur && cur.trk === b.trk && cur.idx === b.idx; // re-clic = désélection
-          stRef.current.selWp = b && !same ? { pt: b.pt, trk: b.trk, idx: b.idx } : null;
+          stRef.current.selWp = b && b.pt && !same ? { pt: b.pt, trk: b.trk, idx: b.idx } : null;
           if (selRaidRef.current) { selRaidRef.current = null; onSelectRaid(null); }
         }
       }
-      drag = null;
+      drag = null; dragRef.current = false;
     };
     cv.addEventListener('mousedown', down); window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
     return () => { cv.removeEventListener('mousedown', down); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
-  }, [onSelectRaid]);
+  }, [onSelectRaid, onFollowChange]);
 
-  return <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />;
+  return <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'grab' }} />;
 }

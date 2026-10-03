@@ -37,5 +37,21 @@ src/
 └── types/                   # TypeScript data contract
 ```
 
-The drawing engine (`components/ReplayMap/render.ts`) is an iso-functional port
-of the legacy single-file map `../carte_midway.html`.
+The drawing engine (`components/ReplayMap/render.ts`) stacks a realistic world
+under a tactical HUD, all in Canvas 2D with no extra dependency:
+
+| Module | Role |
+|---|---|
+| `view.ts` | Map projection (nautical miles around Midway → CSS pixels) |
+| `sky.ts` | Sun position for June 1942 and day/night lighting (tested in `sky.test.ts`) |
+| `ocean.ts` | Sea colour, swell and chop textures anchored to the world, sun glint, Midway atoll |
+| `weather.ts` | Wind and cloud cover interpolated from the `weather_obs` table; cloud layer and shadows |
+| `sprites.ts` | Top-down ships (carrier decks of the period) and aircraft silhouettes |
+| `fx.ts` | Kelvin wakes, smoke drifting with the observed wind, fires, flak, tracers, hits, oil slicks |
+| `hud.ts` | Uncertainty halos, labels with collision avoidance, radar sweeps, compass, daylight readout |
+| `camera.ts` | "Follow the action" target (active combats and raids) |
+
+Effects are deterministic functions of time (no particle state), so a given
+moment always renders the same way. The canvas buffer follows `devicePixelRatio`
+for sharp rendering on Retina screens; `prefers-reduced-motion` slows the
+cosmetic animations.
