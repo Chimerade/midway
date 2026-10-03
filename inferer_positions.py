@@ -153,7 +153,7 @@ for m in cur.execute("""SELECT m.*, (SELECT MIN(a.cruise_speed_kn) FROM mission_
 CONTACT_TARGET = {'CR-0604-0552-PBY': ('KIDO-BUTAI', 'Midway -> KB'),
                   'CR-TONE4-0728': ('TF-16', 'Tone n°4 -> TF US'),
                   'CR-TONE4-0820': ('TF-16', 'Tone n°4 (suivi)'),
-                  'CR-0604-1445-ADAMS': ('SH-HIRYU', 'VS-5 (Adams) -> Hiryū')}
+                  'CR-0604-1430-ADAMS': ('SH-HIRYU', 'VS-5 (Adams) -> Hiryū')}
 MIDWAY = (28.21, -177.37)
 for r in cur.execute("SELECT * FROM contact_reports WHERE reported_lat IS NOT NULL").fetchall():
     target, lbl = CONTACT_TARGET.get(r['report_id'], (None, None))

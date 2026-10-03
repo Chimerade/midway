@@ -76,6 +76,11 @@ for l in con.execute("SELECT * FROM mission_legs WHERE start_ts IS NOT NULL AND 
         vmax = min(cruise[tp] for tp in types if cruise.get(tp)) * 1.35  # marge vent/régime
         if d / h > vmax:
             add('FAIL', 'D1', f"{l['mission_id']} leg{l['seq']}: {d/h:.0f} kn sol > {vmax:.0f} (type le plus lent ×1.35)")
+    # borne basse: un segment dessiné bien plus lent que sa vitesse consignée trahit un
+    # détour (crochet, attente) non modélisé ou des horaires faux. Les attentes sur
+    # cible sont consignées à < 60 nds et restent hors du contrôle.
+    if l['speed_kn'] and l['speed_kn'] >= 60 and d / h < 0.65 * l['speed_kn']:
+        add('WARN', 'D3', f"{l['mission_id']} leg{l['seq']}: {d/h:.0f} kn dessinés pour {l['speed_kn']:.0f} kn consignés (< 65 %) — détour non modélisé ou horaires à revoir")
 search_missions = {r[0] for r in con.execute("SELECT mission_id FROM missions WHERE mission_type='search'")}
 for mid, legs in legs_by_mission.items():
     if mid in search_missions:
@@ -84,7 +89,16 @@ for mid, legs in legs_by_mission.items():
     types = mission_types.get(mid, [])
     if types:
         rmin = min(radius[tp] for tp in types if radius.get(tp))
-        total = sum(dist_nm(l['start_lat'], l['start_lon'], l['end_lat'], l['end_lon']) for l in legs)
+        # un appareil ne vole qu'une branche quand le groupe se sépare (segments
+        # simultanés): on somme, par tranche de segments chevauchants, la plus longue
+        total, grp, grp_end = 0.0, [], None
+        for l in sorted(legs, key=lambda l: t(l['start_ts'])):
+            d = dist_nm(l['start_lat'], l['start_lon'], l['end_lat'], l['end_lon'])
+            if grp and t(l['start_ts']) < grp_end:
+                grp.append(d); grp_end = max(grp_end, t(l['end_ts']))
+            else:
+                total += max(grp, default=0); grp, grp_end = [d], t(l['end_ts'])
+        total += max(grp, default=0)
         if total > rmin * 2.2:
             add('WARN', 'D2', f"{mid}: trajets {total:.0f} nm > 2.2×rayon de combat du type le plus lent ({rmin} nm)")
 
@@ -154,7 +168,7 @@ tmin_all = t('1942-06-03T00:00:00-12:00'); tmax_all = t('1942-06-07T08:00:00-12:
 ACTIVE_UNTIL = {  # fin d'existence attendue de l'entité
     'KIDO-BUTAI': '1942-06-05T09:12:00-12:00', 'TF-16': '1942-06-07T08:00:00-12:00',
     'TF-17': '1942-06-06T14:00:00-12:00', 'CRUDIV7': '1942-06-06T19:30:00-12:00',
-    'SH-HIRYU': '1942-06-05T09:12:00-12:00', 'SH-CV5': '1942-06-07T07:01:00-12:00'}
+    'SH-HIRYU': '1942-06-05T09:12:00-12:00', 'SH-CV5': '1942-06-07T05:01:00-12:00'}
 for ent, until in ACTIVE_UNTIL.items():
     rows = con.execute("SELECT MIN(ts) a, MAX(ts) b, COUNT(*) n FROM positions WHERE entity_id=?", (ent,)).fetchone()
     if not rows['n']:
@@ -163,10 +177,14 @@ for ent, until in ACTIVE_UNTIL.items():
     if gap_end > 6:
         add('WARN', 'H2', f"{ent}: dernière position {rows['b'][5:16]} mais actif jusqu'à {until[5:16]} ({gap_end:.0f} h sans piste)")
 
-# Missions avec attaque mais sans aucun segment (inaffichables)
-for m in con.execute("""SELECT mission_id FROM missions WHERE attack_ts IS NOT NULL
-                        AND mission_id NOT IN (SELECT DISTINCT mission_id FROM mission_legs)"""):
-    add('WARN', 'H3', f"{m['mission_id']}: mission avec attaque mais sans segment de trajet")
+# Missions avec attaque ou appareils engagés mais sans aucun segment (invisibles sur la carte)
+for m in con.execute("""SELECT m.mission_id, m.attack_ts, COALESCE(SUM(ms.aircraft_committed),0) n
+                        FROM missions m LEFT JOIN mission_squadrons ms ON ms.mission_id=m.mission_id
+                        WHERE m.mission_id NOT IN (SELECT DISTINCT mission_id FROM mission_legs)
+                        GROUP BY m.mission_id"""):
+    if m['attack_ts'] or m['n']:
+        add('WARN', 'H3', f"{m['mission_id']}: {m['n']} appareils engagés{', avec attaque' if m['attack_ts'] else ''}"
+                          " mais aucun segment de trajet — mission invisible sur la carte")
 
 # ============================================================
 # I. Tables structurantes encore vides (backlog de phases)
@@ -257,6 +275,44 @@ for ent in [r[0] for r in con.execute("SELECT DISTINCT entity_id FROM positions 
         diff = abs((r - a['course_deg'] + 180) % 360 - 180)
         if diff > 45:
             add('WARN', 'N1', f"{ent} @ {a['ts'][5:16]}: cap consigné {a['course_deg']:.0f}° mais route sortante {r:.0f}° (écart {diff:.0f}°) — virage manquant ou cap à corriger")
+
+# ============================================================
+# P. Un navire qui se détache de sa formation doit apparaître
+#    DANS son halo : au premier point de sa piste propre, la
+#    distance au symbole de la formation (position et halo tels
+#    que la carte les dessine) ne peut excéder la somme des
+#    deux incertitudes — sinon la carte montre un saut.
+# ============================================================
+fparent = {r['formation_id']: r['parent_formation_id'] for r in con.execute("SELECT formation_id, parent_formation_id FROM formations")}
+f_tracked = {r[0] for r in con.execute("SELECT DISTINCT entity_id FROM positions WHERE entity_table='formations'")}
+def tracked_formation(fid):
+    seen = set()
+    while fid and fid not in seen:
+        if fid in f_tracked: return fid
+        seen.add(fid); fid = fparent.get(fid)
+    return None
+def drawn_pos(eid, when):
+    """Position et halo de l'entité tels que render.ts les dessine (None hors piste)."""
+    rows = con.execute("SELECT ts, lat, lon, position_error_nm err FROM positions WHERE entity_id=? ORDER BY ts", (eid,)).fetchall()
+    if not rows or when < t(rows[0]['ts']): return None
+    for a, b in zip(rows, rows[1:]):
+        ta, tb = t(a['ts']), t(b['ts'])
+        if ta <= when <= tb:
+            f = (when - ta).total_seconds() / max(1, (tb - ta).total_seconds())
+            ea, eb = a['err'] or 25, b['err'] or 25
+            return (a['lat'] + f*(b['lat']-a['lat']), unwrap(a['lon']) + f*(unwrap(b['lon'])-unwrap(a['lon'])), ea + f*(eb-ea))
+    last, h = rows[-1], (when - t(rows[-1]['ts'])).total_seconds() / 3600
+    return (last['lat'], unwrap(last['lon']), min(90, (last['err'] or 25) + 5 * h)) if h < 6 else None  # piste périmée
+for s in con.execute("""SELECT DISTINCT p.entity_id sid, sh.formation_id fid FROM positions p
+                        JOIN ships sh ON sh.ship_id=p.entity_id WHERE p.entity_table='ships'"""):
+    form = tracked_formation(s['fid'])
+    if not form: continue
+    first = con.execute("SELECT ts, lat, lon, position_error_nm err FROM positions WHERE entity_id=? ORDER BY ts LIMIT 1", (s['sid'],)).fetchone()
+    fp = drawn_pos(form, t(first['ts']))
+    if not fp: continue
+    d, lim = dist_nm(first['lat'], first['lon'], fp[0], fp[1]), (first['err'] or 25) + fp[2]
+    if d > lim:
+        add('FAIL', 'P1', f"{s['sid']} apparaît à {d:.0f} nm de {form} ({first['ts'][5:16]}) > halos cumulés {lim:.0f} nm — saut sur la carte")
 
 # ============================================================
 # G. Cohérence cinématique des événements : à event.ts, l'acteur/

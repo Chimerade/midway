@@ -11,7 +11,7 @@ def build_db(path):
         'phase8_depouillement.sql','phase8b_recherches.sql','phase8c_j3_recherches.sql',
         'phase9_params_f2.sql','phase10_halos.sql','phase10b_retours.sql','phase10c_effectifs.sql',
         'phase10d_evenements_missions.sql','phase10e_reperages.sql','phase10f_b17.sql',
-        'phase13_rebaseline_tf.sql')
+        'phase13_rebaseline_tf.sql','phase14_verifications.sql')
     con = sqlite3.connect(path); con.execute("PRAGMA foreign_keys=ON")
     for f in files: con.executescript(open(os.path.join(ROOT, f)).read())
     con.commit(); con.close()
